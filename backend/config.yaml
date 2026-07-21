@@ -1,0 +1,75 @@
+# ECG Guardian – Backend Configuration
+# All runtime-configurable values live here. No hardcoded values in source code.
+
+app:
+  title: "ECG Guardian API"
+  version: "1.0.0"
+  description: "AI-Based Real-Time ECG Monitoring Backend"
+  debug: false
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+
+# Serial / Hardware
+serial:
+  port: "COM6"
+  baud_rate: 115200
+  timeout: 1.0
+  reconnect_interval: 5      # seconds between reconnect attempts
+  mock_when_unavailable: true # use synthetic ECG generator if COM unavailable
+  sampling_rate: 250          # Hz – samples per second
+
+# Database
+database:
+  path: "data/ecg_guardian.db"
+  echo: false                 # set true for SQL query logging
+
+# Data retention
+retention:
+  raw_ecg_hours: 48           # delete raw samples older than this
+  backup_interval_hours: 24
+
+# Signal processing
+processing:
+  lowpass_cutoff: 40.0        # Hz  – remove high-freq noise
+  highpass_cutoff: 0.5        # Hz  – remove baseline wander
+  filter_order: 4
+  r_peak_min_distance: 0.6    # seconds – minimum RR interval (max ~100 BPM)
+  r_peak_threshold_factor: 0.6
+
+# Alert thresholds
+alerts:
+  hr_high: 100
+  hr_low: 60
+  hr_critical_high: 150
+  hr_critical_low: 40
+  signal_quality_warn: 50     # %
+  signal_quality_poor: 30     # %
+  max_active_alerts: 50
+
+# Authentication / Security
+security:
+  jwt_secret: "ecg-guardian-secret-change-in-production-2026"
+  jwt_algorithm: "HS256"
+  access_token_expire_minutes: 60
+  refresh_token_expire_days: 7
+  bcrypt_rounds: 12
+
+# Logging
+logging:
+  level: "INFO"               # DEBUG | INFO | WARNING | ERROR | CRITICAL
+  max_bytes: 10485760         # 10 MB per log file
+  backup_count: 5
+
+# WebSocket
+websocket:
+  broadcast_interval: 0.04    # seconds – ~25 fps to frontend
+  max_connections: 20
+
+# Scheduler
+scheduler:
+  cleanup_interval_hours: 6
+  daily_summary_hour: 0       # midnight
+  bp_reminder_days: 7
