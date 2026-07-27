@@ -15,7 +15,7 @@ server:
 # Serial / Hardware
 serial:
   port: "COM6"
-  baud_rate: 115200
+  baud_rate: 9600
   timeout: 1.0
   reconnect_interval: 5      # seconds between reconnect attempts
   mock_when_unavailable: true # use synthetic ECG generator if COM unavailable

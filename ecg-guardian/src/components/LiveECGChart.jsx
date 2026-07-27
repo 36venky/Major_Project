@@ -59,6 +59,17 @@ export default function LiveECGChart({ windowSeconds = DEFAULT_WINDOW }) {
   const xMax = displayData.length / SAMPLING_RATE;
   const xMin = Math.max(0, xMax - windowSeconds);
 
+  // Auto-scale Y-axis from actual data with 15% padding
+  const yRaw = displayData.map(d => (d.value ?? 0) * zoom);
+  let yMin = -1.2, yMax = 1.2;  // sensible defaults when no data
+  if (yRaw.length > 0) {
+    const dataMin = Math.min(...yRaw);
+    const dataMax = Math.max(...yRaw);
+    const pad = Math.max((dataMax - dataMin) * 0.15, 0.05);
+    yMin = dataMin - pad;
+    yMax = dataMax + pad;
+  }
+
   const exportCSV = useCallback(() => {
     const rows = displayData.map(d => `${d.time},${d.value}`).join('\n');
     const blob  = new Blob([`timestamp,value\n${rows}`], { type: 'text/csv' });
@@ -153,6 +164,7 @@ export default function LiveECGChart({ windowSeconds = DEFAULT_WINDOW }) {
               fixedrange: false,
             },
             yaxis: {
+              range:      [yMin, yMax],
               title:      { text: 'Amplitude', font: { color: '#4ade80', size: 11 } },
               gridcolor:  '#1a3a2a',
               zerolinecolor: '#1a3a2a',

@@ -16,7 +16,19 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
+
+# Ensure .env is loaded before reading credentials so os.getenv() works
+# even when the module is imported before pydantic-settings initialises.
+try:
+    from dotenv import load_dotenv
+    # twilio_service.py lives at backend/app/services/twilio_service.py
+    # .env lives at backend/.env  →  2 levels up from this file
+    _env_path = Path(__file__).resolve().parents[2] / ".env"
+    load_dotenv(dotenv_path=_env_path, override=False)
+except ImportError:
+    pass  # python-dotenv not installed; rely on environment being pre-loaded
 
 from app.core.logger import get_logger
 from app.database.database import AsyncSessionLocal
@@ -37,6 +49,33 @@ _RISK_LABELS: dict[str, str] = {
     "High":     "HIGH",
     "Critical": "CRITICAL",
 }
+
+
+def e164(phone: str) -> str:
+    """
+    Normalise a phone number to E.164 format (+CountrySubscriber, no spaces).
+
+    Handles common Indian formats:
+      '+91 7619109684'  → '+917619109684'
+      '7619109684'      → '+917619109684'
+      '07619109684'     → '+917619109684'
+      '917619109684'    → '+917619109684'
+    """
+    if not phone:
+        return phone
+    # Strip whatsapp: prefix if present — we re-add it at send time
+    raw = phone.replace("whatsapp:", "").strip()
+    # Remove all spaces, dashes, dots, parentheses
+    raw = "".join(c for c in raw if c.isdigit() or c == "+")
+    if raw.startswith("+"):
+        return raw                          # already E.164
+    if raw.startswith("0"):
+        raw = raw[1:]                       # drop leading 0
+    if len(raw) == 10:
+        return f"+91{raw}"                  # 10-digit → Indian mobile
+    if raw.startswith("91") and len(raw) == 12:
+        return f"+{raw}"                    # 91XXXXXXXXXX → +91XXXXXXXXXX
+    return f"+{raw}"                        # best-effort
 
 
 class TwilioWhatsAppService:
@@ -176,7 +215,7 @@ class TwilioWhatsAppService:
 
         to_number = (
             recipient_phone if recipient_phone.startswith("whatsapp:")
-            else f"whatsapp:{recipient_phone}"
+            else f"whatsapp:{e164(recipient_phone)}"
         )
 
         delays = [2, 4, 8]

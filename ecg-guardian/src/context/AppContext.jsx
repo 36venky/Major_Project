@@ -38,9 +38,9 @@ const initialState = {
     lastUpdated:   new Date().toISOString(),
   },
   aiAnalysis: {
-    rhythm:         'Normal Sinus Rhythm',
-    confidence:     98,
-    riskLevel:      'Low',
+    rhythm:         null,
+    confidence:     null,
+    riskLevel:      null,
     heartRateTrend: 'Stable',
     signalQuality:  'Good',
     recentEvents:   [],
@@ -81,7 +81,7 @@ function appReducer(state, action) {
           current: next,
           trend: next > prev + 3 ? 'up' : next < prev - 3 ? 'down' : 'stable',
           history: [...state.heartRate.history.slice(-59), next],
-          status: next < 60 ? 'Bradycardia' : next > 100 ? 'Tachycardia' : 'Normal',
+          status: next <= 60 ? 'Bradycardia' : next >= 100 ? 'Tachycardia' : 'Normal',
         },
       };
     }

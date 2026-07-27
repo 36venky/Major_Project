@@ -86,7 +86,22 @@ export default function ECGCanvas() {
 
       const { width, height } = canvas;
       const mid = height / 2;
-      const amp = (height * 0.38) * zoomRef.current;
+
+      // Auto-scale: derive amp from actual buffer range so real COM6 data fills the canvas
+      const scaleBuf = bufferRef.current;
+      let amp = (height * 0.38) * zoomRef.current; // fallback
+      if (scaleBuf.length > 1) {
+        const vals = scaleBuf.map(p => p.value ?? 0);
+        const dataMin = Math.min(...vals);
+        const dataMax = Math.max(...vals);
+        const dataRange = dataMax - dataMin;
+        if (dataRange > 0.001) {
+          // Scale so the full data range fills 76% of the canvas height
+          amp = (height * 0.38 / (dataRange / 2)) * zoomRef.current;
+          // Clamp to avoid absurd scaling on noise
+          amp = Math.max(height * 0.1, Math.min(height * 2, amp));
+        }
+      }
 
       // Scroll existing content left by SCROLL_SPEED pixels
       const imageData = ctx.getImageData(SCROLL_SPEED, 0, width - SCROLL_SPEED, height);

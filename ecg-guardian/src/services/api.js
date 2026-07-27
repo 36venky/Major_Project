@@ -1,15 +1,17 @@
 /**
  * api.js – REST API service layer.
  * All communication with FastAPI backend goes through this file.
- * Falls back to mock data when backend is unavailable.
  */
+
+import { getAuthHeaders } from './auth';
 
 const BASE_URL = 'http://localhost:8000';
 
 async function request(method, path, body) {
+  const authHdrs = await getAuthHeaders();
   const opts = {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHdrs },
   };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${BASE_URL}${path}`, opts);
@@ -18,24 +20,25 @@ async function request(method, path, body) {
 }
 
 /* ── Patient ────────────────────────────────────────────── */
-export const getPatient = () => request('GET', '/patient');
-export const updatePatient = (data) => request('PUT', '/patient', data);
+export const getPatient    = (id)       => request('GET', `/patients/${id}`);
+export const updatePatient = (id, data) => request('PUT', `/patients/${id}`, data);
 
-/* ── Device ─────────────────────────────────────────────── */
-export const getDevice = () => request('GET', '/device');
+/* ── Alerts ─────────────────────────────────────────────── */
+export const getAlerts          = (patientId) => request('GET',  `/alerts?patient_id=${patientId}`);
+export const sendWhatsAppReport = (patientId) => request('POST', '/alerts/send-report', { patient_id: patientId });
 
 /* ── Weekly Health ──────────────────────────────────────── */
-export const getWeeklyHealth = () => request('GET', '/weekly-health');
+export const getWeeklyHealth  = ()     => request('GET',  '/weekly-health');
 export const postWeeklyHealth = (data) => request('POST', '/weekly-health', data);
-
-/* ── History ────────────────────────────────────────────── */
-export const getHistory = () => request('GET', '/history');
 
 /* ── Reports ────────────────────────────────────────────── */
 export const getReports = () => request('GET', '/reports');
 
-/* ── Alerts ─────────────────────────────────────────────── */
-export const getAlerts = () => request('GET', '/alerts');
+/* ── History ────────────────────────────────────────────── */
+export const getHistory = () => request('GET', '/history');
+
+/* ── Device ─────────────────────────────────────────────── */
+export const getDevice = () => request('GET', '/device');
 
 /* ── Mock History Sessions (used when backend is down) ─── */
 export const MOCK_HISTORY = [

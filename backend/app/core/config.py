@@ -72,7 +72,7 @@ class Settings(BaseSettings):
 
     # ── Serial ─────────────────────────────────────────────
     SERIAL_PORT: str           = _get("serial.port",                "COM6")
-    BAUD_RATE: int             = _get("serial.baud_rate",           115200)
+    BAUD_RATE: int             = _get("serial.baud_rate",           9600)
     SERIAL_TIMEOUT: float      = _get("serial.timeout",             1.0)
     RECONNECT_INTERVAL: int    = _get("serial.reconnect_interval",  5)
     MOCK_WHEN_UNAVAILABLE: bool= _get("serial.mock_when_unavailable", True)

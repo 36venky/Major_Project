@@ -102,6 +102,7 @@ export function useWebSocket() {
           }
 
           // AI analysis (rhythm, confidence, riskLevel, etc.)
+          // Only update if backend has actual analysis (arrhythmia != null)
           if (data.analysis) {
             dispatch({ type: 'SET_AI_ANALYSIS', payload: data.analysis });
 
@@ -116,6 +117,7 @@ export function useWebSocket() {
               });
             }
           }
+          // If analysis is null, leave existing state intact (don't flash stale defaults)
 
           // Signal quality
           if (data.quality_pct !== undefined) {

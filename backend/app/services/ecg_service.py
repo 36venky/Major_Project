@@ -129,6 +129,9 @@ class ECGService:
             )
         logger.info("ECG session opened: %s", self._session_id)
 
+        # Notify guardian that monitoring has started (Feature 4 – informational)
+        asyncio.create_task(self._notify_monitoring_started(patient_id))
+
     async def _close_session(self) -> None:
         if not self._session_id:
             self._is_monitoring = False
@@ -232,29 +235,33 @@ class ECGService:
             if not self._ws_connections or not self._raw_buffer:
                 continue
             try:
-                ecg_val    = self._raw_buffer[-1] if self._raw_buffer else 0.0
                 quality    = self._current_quality
                 arrhythmia = self._current_arrhythmia
 
-                payload = WSPayload(
-                    timestamp   = datetime.now(timezone.utc).isoformat(),
-                    ecg         = round(ecg_val, 2),
-                    bpm         = int(self._current_bpm),
-                    quality     = quality.label if quality else "Good",
-                    quality_pct = quality.score if quality else 90,
-                    status      = arrhythmia.rhythm if arrhythmia else "Normal Sinus Rhythm",
-                    session_id  = self._session_id,
-                    analysis    = {
-                        "rhythm":        arrhythmia.rhythm      if arrhythmia else "Normal Sinus Rhythm",
-                        "confidence":    arrhythmia.confidence  if arrhythmia else 95,
-                        "riskLevel":     arrhythmia.risk_level  if arrhythmia else "Low",
-                        "signalQuality": quality.label          if quality    else "Good",
-                        "heartRateTrend": "Stable",
-                        # Include live risk prediction if available
-                        "riskPrediction": self._current_risk,
-                    } if arrhythmia else None,
-                )
-                await self._send_to_all(payload.model_dump_json())
+                # Send all samples accumulated since last broadcast (typically ~10 at 250 Hz / 25 fps)
+                # so the frontend graph receives every real sample, not just the latest one.
+                samples_per_frame = max(1, int(settings.SAMPLING_RATE * _BROADCAST_INTERVAL))
+                recent = list(self._raw_buffer)[-samples_per_frame:]
+
+                for ecg_val in recent:
+                    payload = WSPayload(
+                        timestamp   = datetime.now(timezone.utc).isoformat(),
+                        ecg         = round(ecg_val, 2),
+                        bpm         = int(self._current_bpm),
+                        quality     = quality.label if quality else "Good",
+                        quality_pct = quality.score if quality else 90,
+                        status      = arrhythmia.rhythm if arrhythmia else "Normal Sinus Rhythm",
+                        session_id  = self._session_id,
+                        analysis    = {
+                            "rhythm":        arrhythmia.rhythm      if arrhythmia else None,
+                            "confidence":    arrhythmia.confidence  if arrhythmia else None,
+                            "riskLevel":     arrhythmia.risk_level  if arrhythmia else None,
+                            "signalQuality": quality.label          if quality    else "Good",
+                            "heartRateTrend": "Stable",
+                            "riskPrediction": self._current_risk,
+                        } if arrhythmia else None,
+                    )
+                    await self._send_to_all(payload.model_dump_json())
             except Exception as exc:
                 logger.debug("Broadcast error: %s", exc)
 
@@ -277,6 +284,72 @@ class ECGService:
     async def disconnect_ws(self, websocket: WebSocket) -> None:
         self._ws_connections.discard(websocket)
         logger.info("WebSocket client disconnected. Total: %d", len(self._ws_connections))
+
+    # ── Monitoring-started notification ────────────────────
+
+    async def _notify_monitoring_started(self, patient_id: str) -> None:
+        """
+        Send a WhatsApp notification to the patient's guardian when a new
+        ECG monitoring session opens.  Uses the Twilio service directly so
+        we can bypass the severity-filter (informational message).
+        """
+        try:
+            from app.services.twilio_service import whatsapp_service, e164
+            if not whatsapp_service._enabled:
+                logger.warning(
+                    "Monitoring-started WhatsApp skipped — Twilio service disabled "
+                    "(check TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_WHATSAPP_FROM in .env)"
+                )
+                return
+
+            async with AsyncSessionLocal() as db:
+                patient = await crud.get_patient(db, patient_id)
+
+            if not patient:
+                logger.warning("Monitoring-started WhatsApp skipped — patient %s not found", patient_id)
+                return
+
+            if not patient.guardian_phone:
+                logger.warning(
+                    "Monitoring-started WhatsApp skipped — no guardian_phone for patient %s", patient_id
+                )
+                return
+
+            ts_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            body = (
+                f"\u2705 *ECG Guardian \u2013 Monitoring Started*\n\n"
+                f"*Patient:* {patient.name}\n"
+                f"*Session ID:* {self._session_id}\n"
+                f"*Started at:* {ts_str}\n"
+                f"*Device:* COM6 @ 250 Hz\n\n"
+                f"Real-time ECG monitoring is now active. "
+                f"You will receive alerts if any critical conditions are detected.\n\n"
+                f"_ECG Guardian \u2014 Remote Cardiac Monitoring_"
+            )
+
+            to_number = f"whatsapp:{e164(patient.guardian_phone)}"
+
+            # Capture as plain locals so the nested function is fully self-contained
+            account_sid = whatsapp_service._account_sid
+            auth_token  = whatsapp_service._auth_token
+            from_number = whatsapp_service._from_number
+
+            def _do_send():
+                from twilio.rest import Client
+                Client(account_sid, auth_token).messages.create(
+                    from_=from_number,
+                    to=to_number,
+                    body=body,
+                )
+
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _do_send)
+            logger.info(
+                "Monitoring-started WhatsApp sent to %s for patient=%s session=%s",
+                patient.guardian_phone, patient_id, self._session_id,
+            )
+        except Exception as exc:
+            logger.warning("Could not send monitoring-started WhatsApp: %s", exc)
 
     # ── Alert callback ─────────────────────────────────────
 

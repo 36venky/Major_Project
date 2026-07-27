@@ -70,6 +70,7 @@ async def update_patient(
     """
     await get_patient(db, patient_id)   # raises if missing
     updated = await crud.update_patient(db, patient_id, data.model_dump(exclude_none=True))
+    await db.commit()
     logger.info("Patient updated: %s", patient_id)
     return updated
 
