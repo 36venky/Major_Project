@@ -87,6 +87,25 @@ export function useWebSocket() {
           const data = JSON.parse(e.data);
           if (data.error) return; // auth/protocol error frame
 
+          // ── WhatsApp send-status notification ───────────
+          // Backend pushes one of these after each Twilio attempt.
+          if (data.type === 'whatsapp_status') {
+            const ok  = data.status === 'sent';
+            dispatch({
+              type: 'ADD_NOTIFICATION',
+              payload: {
+                id:          `ws-${Date.now()}-${Math.random()}`,
+                title:       data.title,
+                description: data.description,
+                severity:    ok ? 'success' : 'error',
+                time:        data.timestamp || new Date().toISOString(),
+                phone:       data.phone,
+                alert_type:  data.alert_type,
+              },
+            });
+            return; // nothing else to process in this frame
+          }
+
           // ECG sample — normalise ADC 0–4095 → [-1, 1]
           if (data.ecg !== undefined) {
             const normalised = (data.ecg - 2048) / 2048;

@@ -14,6 +14,9 @@ export default defineConfig({
       ),
     },
   },
+  server: {
+    allowedHosts: true,  // allow all hosts including ngrok tunnels
+  },
   build: {
     chunkSizeWarningLimit: 1500,  // plotly is large; suppress noise
   },

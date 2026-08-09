@@ -57,6 +57,10 @@ function Toast({ notification: n, onDismiss }) {
         {n.description && (
           <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.description}</p>
         )}
+        {/* Show the exact phone number used for WhatsApp alerts */}
+        {n.phone && (
+          <p className="text-[10px] text-slate-400 mt-1 font-mono">{n.phone}</p>
+        )}
       </div>
       <button onClick={onDismiss} className="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
         <X className="w-4 h-4" />
