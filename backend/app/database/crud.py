@@ -41,7 +41,9 @@ def _utcnow() -> datetime:
 async def create_patient(db: AsyncSession, data: dict) -> Patient:
     """Insert a new patient record. Supports auto-generated patient_id with date-based format."""
     from datetime import date as _date
-    import re
+
+    # Work on a copy so we never mutate the caller's dict
+    data = dict(data)
 
     explicit_id = data.pop("patient_id", None)
     if explicit_id:
@@ -135,7 +137,11 @@ async def close_session(
         return None
 
     now = _utcnow()
-    elapsed = now - session.start_time.replace(tzinfo=timezone.utc) if session.start_time.tzinfo else now - session.start_time
+    # Normalise start_time — always treat as UTC regardless of stored tzinfo
+    start = session.start_time
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    elapsed = now - start
     hours, rem = divmod(int(elapsed.total_seconds()), 3600)
     minutes, seconds = divmod(rem, 60)
 
@@ -449,3 +455,18 @@ async def create_alert_log(
     db.add(log)
     await db.flush()
     return log
+
+
+async def get_alert_logs(
+    db: AsyncSession,
+    patient_id: str,
+    limit: int = 50,
+) -> Sequence[AlertLog]:
+    """Return recent WhatsApp dispatch logs for a patient, newest first."""
+    result = await db.execute(
+        select(AlertLog)
+        .where(AlertLog.patient_id == patient_id)
+        .order_by(AlertLog.timestamp.desc())
+        .limit(limit)
+    )
+    return result.scalars().all()

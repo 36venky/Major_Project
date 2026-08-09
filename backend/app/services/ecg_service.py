@@ -289,12 +289,11 @@ class ECGService:
 
     async def _notify_monitoring_started(self, patient_id: str) -> None:
         """
-        Send a WhatsApp notification to the patient's guardian when a new
-        ECG monitoring session opens.  Uses the Twilio service directly so
-        we can bypass the severity-filter (informational message).
+        Send a WhatsApp notification to ALL of the patient's contacts when a
+        new ECG monitoring session opens.
         """
         try:
-            from app.services.twilio_service import whatsapp_service, e164
+            from app.services.twilio_service import whatsapp_service, e164, _collect_recipients
             if not whatsapp_service._enabled:
                 logger.warning(
                     "Monitoring-started WhatsApp skipped — Twilio service disabled "
@@ -306,12 +305,20 @@ class ECGService:
                 patient = await crud.get_patient(db, patient_id)
 
             if not patient:
-                logger.warning("Monitoring-started WhatsApp skipped — patient %s not found", patient_id)
+                logger.warning(
+                    "Monitoring-started WhatsApp skipped — patient %s not found", patient_id
+                )
                 return
 
-            if not patient.guardian_phone:
+            recipients = _collect_recipients(
+                patient.guardian_phone,
+                patient.emergency_contact,
+                patient.phone,
+            )
+            if not recipients:
                 logger.warning(
-                    "Monitoring-started WhatsApp skipped — no guardian_phone for patient %s", patient_id
+                    "Monitoring-started WhatsApp skipped — no contact numbers for patient %s",
+                    patient_id,
                 )
                 return
 
@@ -321,33 +328,86 @@ class ECGService:
                 f"*Patient:* {patient.name}\n"
                 f"*Session ID:* {self._session_id}\n"
                 f"*Started at:* {ts_str}\n"
-                f"*Device:* COM6 @ 250 Hz\n\n"
+                f"*Device:* {settings.SERIAL_PORT} @ {settings.SAMPLING_RATE} Hz\n\n"
                 f"Real-time ECG monitoring is now active. "
                 f"You will receive alerts if any critical conditions are detected.\n\n"
                 f"_ECG Guardian \u2014 Remote Cardiac Monitoring_"
             )
 
-            to_number = f"whatsapp:{e164(patient.guardian_phone)}"
-
-            # Capture as plain locals so the nested function is fully self-contained
             account_sid = whatsapp_service._account_sid
             auth_token  = whatsapp_service._auth_token
             from_number = whatsapp_service._from_number
 
-            def _do_send():
-                from twilio.rest import Client
-                Client(account_sid, auth_token).messages.create(
-                    from_=from_number,
-                    to=to_number,
-                    body=body,
-                )
-
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _do_send)
-            logger.info(
-                "Monitoring-started WhatsApp sent to %s for patient=%s session=%s",
-                patient.guardian_phone, patient_id, self._session_id,
-            )
+
+            async def _send_one(num: str) -> dict:
+                to_number = f"whatsapp:{num}"
+                try:
+                    def _do_send():
+                        from twilio.rest import Client
+                        Client(account_sid, auth_token).messages.create(
+                            from_=from_number, to=to_number, body=body,
+                        )
+                    await loop.run_in_executor(None, _do_send)
+                    # Log to DB
+                    async with AsyncSessionLocal() as db:
+                        await crud.create_alert_log(
+                            db,
+                            patient_id=patient_id,
+                            alert_type="MONITORING_STARTED",
+                            recipient=num,
+                            status="sent",
+                        )
+                        await db.commit()
+                    logger.info(
+                        "Monitoring-started WhatsApp sent to %s for patient=%s session=%s",
+                        num, patient_id, self._session_id,
+                    )
+                    return {"phone": num, "status": "sent", "error": None}
+                except Exception as exc:
+                    err = str(exc)
+                    async with AsyncSessionLocal() as db:
+                        await crud.create_alert_log(
+                            db,
+                            patient_id=patient_id,
+                            alert_type="MONITORING_STARTED",
+                            recipient=num,
+                            status="failed",
+                            error_message=err,
+                        )
+                        await db.commit()
+                    logger.warning(
+                        "Monitoring-started WhatsApp failed to %s patient=%s: %s",
+                        num, patient_id, err,
+                    )
+                    return {"phone": num, "status": "failed", "error": err}
+
+            results = await asyncio.gather(*[_send_one(num) for num in recipients])
+
+            # Push a toast notification to all connected frontend clients
+            for r in results:
+                status_ok   = r["status"] == "sent"
+                phone_short = r["phone"][-4:] if len(r["phone"]) >= 4 else r["phone"]
+                notif_payload = json.dumps({
+                    "type":        "whatsapp_status",
+                    "status":      r["status"],
+                    "phone":       r["phone"],
+                    "alert_type":  "MONITORING_STARTED",
+                    "severity":    "info",
+                    "title":       (
+                        f"✅ Session alert sent to …{phone_short}"
+                        if status_ok else
+                        f"❌ Session alert failed to …{phone_short}"
+                    ),
+                    "description": (
+                        f"Monitoring-started notification delivered."
+                        if status_ok else
+                        f"Could not deliver to …{phone_short}: {r['error'] or 'unknown error'}"
+                    ),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+                await self._send_to_all(notif_payload)
+
         except Exception as exc:
             logger.warning("Could not send monitoring-started WhatsApp: %s", exc)
 
@@ -372,22 +432,55 @@ class ECGService:
         except Exception as exc:
             logger.error("Failed to persist alert: %s", exc)
 
-        # Send WhatsApp notification (Feature 4)
+        # Send WhatsApp notification to all patient contacts (Feature 4)
         try:
             from app.services.twilio_service import whatsapp_service
             async with AsyncSessionLocal() as db:
                 patient = await crud.get_patient(db, event.patient_id)
+
             if patient:
+                # Capture alert details for the result callback closure
+                alert_type_label = event.alert_type
+                severity_label   = event.severity
+
+                async def _on_whatsapp_result(results: list[dict]) -> None:
+                    """Push a toast notification to the frontend for each send attempt."""
+                    for r in results:
+                        status_ok   = r["status"] == "sent"
+                        phone_short = r["phone"][-4:] if len(r["phone"]) >= 4 else r["phone"]
+                        notif_payload = json.dumps({
+                            "type":        "whatsapp_status",
+                            "status":      r["status"],
+                            "phone":       r["phone"],
+                            "alert_type":  alert_type_label,
+                            "severity":    severity_label,
+                            "title":       (
+                                f"✅ Alert sent to …{phone_short}"
+                                if status_ok else
+                                f"❌ Alert failed to …{phone_short}"
+                            ),
+                            "description": (
+                                f"WhatsApp {alert_type_label} alert delivered."
+                                if status_ok else
+                                f"Could not deliver to …{phone_short}: {r['error'] or 'unknown error'}"
+                            ),
+                            "timestamp":   datetime.now(timezone.utc).isoformat(),
+                        })
+                        await self._send_to_all(notif_payload)
+
                 whatsapp_service.dispatch(
-                    patient_id    = event.patient_id,
-                    patient_name  = patient.name,
-                    guardian_phone= patient.guardian_phone,
-                    alert_type    = event.alert_type,
-                    severity      = event.severity,
-                    ecg_status    = event.alert_type,
-                    risk_level    = self._current_arrhythmia.risk_level if self._current_arrhythmia else "Low",
-                    alert_message = event.message,
-                    timestamp     = event.timestamp,
+                    patient_id        = event.patient_id,
+                    patient_name      = patient.name,
+                    guardian_phone    = patient.guardian_phone,
+                    emergency_contact = patient.emergency_contact,
+                    phone             = patient.phone,
+                    alert_type        = event.alert_type,
+                    severity          = event.severity,
+                    ecg_status        = event.alert_type,
+                    risk_level        = self._current_arrhythmia.risk_level if self._current_arrhythmia else "Low",
+                    alert_message     = event.message,
+                    timestamp         = event.timestamp,
+                    on_result         = _on_whatsapp_result,
                 )
         except Exception as exc:
             logger.error("WhatsApp dispatch error: %s", exc)

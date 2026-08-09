@@ -1,11 +1,25 @@
 """
 services/prediction_service.py
 ────────────────────────────────
-ML-based cardiac risk prediction (Feature 5).
+ML-based cardiac risk prediction.
 
-Wraps Model/predict.py.  Runs at most once per minute per patient.
-Extracts 32 ECG features from the raw buffer, calls the ensemble model,
-maps label → Risk_Level, and persists the result.
+Wraps Model/predict.py (M2 XGBoost — AAMI 5-class beat classifier).
+Runs at most once per minute per patient.
+
+Pipeline:
+  1. Bandpass-filter the raw buffer  (0.5 – 45 Hz, same as M2/Preprocess.py)
+  2. Detect R-peaks
+  3. Extract the most recent valid beat window  (90 samples before + 100 after R-peak)
+  4. Z-score normalise the window
+  5. Run XGBoost inference  → integer label 0-4
+  6. Map label → risk level  → persist + broadcast
+
+AAMI label → risk level:
+    N (Normal)                 → Low
+    S (Supraventricular)       → Moderate
+    V (Ventricular ectopic)    → High
+    F (Fusion)                 → Moderate
+    Q (Unclassifiable / Paced) → Moderate
 """
 
 from __future__ import annotations
@@ -25,19 +39,37 @@ from app.database import crud
 
 logger = get_logger("services.prediction")
 
-# Add Model/ directory to sys.path so predict.py can be imported
+# ---------------------------------------------------------------------------
+# Add Model/ directory to sys.path so predict.py can be imported directly
+# ---------------------------------------------------------------------------
 _MODEL_DIR = Path(__file__).resolve().parent.parent.parent.parent / "Model"
 if str(_MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(_MODEL_DIR))
 
-# Label → Risk_Level mapping
+# ---------------------------------------------------------------------------
+# AAMI label → clinical risk level (aligned with M2 class scheme)
+# ---------------------------------------------------------------------------
 _LABEL_TO_RISK: dict[str, str] = {
-    "N":    "Low",
-    "SVEB": "Moderate",
-    "F":    "Moderate",
-    "VEB":  "High",
-    "Q":    "Moderate",
+    "N": "Low",       # Normal sinus beat
+    "S": "Moderate",  # Supraventricular ectopic (PAC, etc.)
+    "V": "High",      # Ventricular ectopic (PVC, etc.)
+    "F": "Moderate",  # Fusion beat
+    "Q": "Moderate",  # Unclassifiable / paced beat
 }
+
+# Human-readable beat-type names shown in the frontend RiskCard
+_LABEL_DISPLAY: dict[str, str] = {
+    "N": "Normal Sinus Beat",
+    "S": "Supraventricular Ectopic",
+    "V": "Ventricular Ectopic",
+    "F": "Fusion Beat",
+    "Q": "Unclassifiable Beat",
+}
+
+# Preprocessing constants — must match M2/Preprocess.py exactly
+_WINDOW_BEFORE = 90
+_WINDOW_AFTER  = 100
+_N_FEATURES    = _WINDOW_BEFORE + _WINDOW_AFTER   # 190
 
 # Minimum seconds between predictions per patient
 _PREDICTION_INTERVAL = 60
@@ -47,15 +79,15 @@ class PredictionService:
     """
     Generates per-patient cardiac risk predictions from live ECG data.
 
-    Call `maybe_predict(patient_id, raw_buffer)` after each analysis cycle.
+    Call `maybe_predict(patient_id, raw_buffer, fs)` after each analysis cycle.
     The service enforces a 60-second minimum interval per patient.
     """
 
     def __init__(self) -> None:
         self._last_predicted: dict[str, datetime] = {}
-        self._predict_fn = None   # loaded lazily
-        self._proba_fn   = None
-        self._available  = False
+        self._predict_fn     = None   # loaded lazily
+        self._proba_fn       = None
+        self._available      = False
         self._load_model()
 
     def _load_model(self) -> None:
@@ -64,9 +96,11 @@ class PredictionService:
             self._predict_fn = _predict.predict
             self._proba_fn   = _predict.predict_proba
             self._available  = True
-            logger.info("Prediction model loaded from %s", _MODEL_DIR)
+            logger.info("M2 XGBoost model loaded from %s", _MODEL_DIR)
         except Exception as exc:
-            logger.warning("Prediction model not available: %s — risk prediction disabled.", exc)
+            logger.warning(
+                "Prediction model not available: %s — risk prediction disabled.", exc
+            )
 
     # ── Public API ────────────────────────────────────────
 
@@ -74,39 +108,49 @@ class PredictionService:
         self,
         patient_id: str,
         raw_buffer: deque,
-        fs: int = 250,
+        fs: int = 360,
     ) -> Optional[dict]:
         """
         Run a prediction if the cooldown has elapsed and enough data exists.
 
-        Returns a dict with keys: risk_percentage, risk_level, majority_label
+        Returns a dict:
+            {
+                "risk_percentage": float,
+                "risk_level":      str,   # "Low" | "Moderate" | "High"
+                "majority_label":  str,   # short AAMI code, e.g. "N"
+                "beat_type":       str,   # human-readable, e.g. "Normal Sinus Beat"
+            }
         or None if skipped / unavailable.
         """
         if not self._available:
             return None
 
-        now = datetime.now(timezone.utc)
+        now  = datetime.now(timezone.utc)
         last = self._last_predicted.get(patient_id)
         if last and (now - last) < timedelta(seconds=_PREDICTION_INTERVAL):
             return None
 
-        features = await asyncio.get_event_loop().run_in_executor(
-            None, self._extract_features, list(raw_buffer), fs
+        beat = await asyncio.get_event_loop().run_in_executor(
+            None, self._extract_beat, list(raw_buffer), fs
         )
-        if features is None:
-            logger.debug("Not enough ECG features for patient=%s — skipping prediction.", patient_id)
+        if beat is None:
+            logger.debug(
+                "Could not extract a valid beat window for patient=%s — skipping.", patient_id
+            )
             return None
 
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, self._predict_fn, features, "all"
+            result     = await asyncio.get_event_loop().run_in_executor(
+                None, self._predict_fn, beat, "all"
             )
-            majority = result.get("majority", "N")
+            majority   = result.get("majority", "N")
             risk_level = _LABEL_TO_RISK.get(majority, "Moderate")
+            beat_type  = _LABEL_DISPLAY.get(majority, majority)
 
             proba_dict = await asyncio.get_event_loop().run_in_executor(
-                None, self._proba_fn, features, "xgb"
+                None, self._proba_fn, beat, "xgb"
             )
+            # Risk percentage = confidence in the predicted class
             risk_pct = round(proba_dict.get(majority, 0.0) * 100, 1)
 
             self._last_predicted[patient_id] = now
@@ -114,94 +158,82 @@ class PredictionService:
             await self._persist(patient_id, risk_pct, risk_level, majority)
 
             logger.info(
-                "Risk prediction for patient=%s: %s (%.1f%%) label=%s",
-                patient_id, risk_level, risk_pct, majority,
+                "Risk prediction  patient=%s  label=%s (%s)  risk=%s  confidence=%.1f%%",
+                patient_id, majority, beat_type, risk_level, risk_pct,
             )
-            return {"risk_percentage": risk_pct, "risk_level": risk_level, "majority_label": majority}
+
+            return {
+                "risk_percentage": risk_pct,
+                "risk_level":      risk_level,
+                "majority_label":  majority,
+                "beat_type":       beat_type,
+            }
 
         except Exception as exc:
             logger.error("Prediction failed for patient=%s: %s", patient_id, exc)
             return None
 
-    # ── Feature extraction ────────────────────────────────
+    # ── Beat extraction (M2/Preprocess.py pipeline) ───────
 
     @staticmethod
-    def _extract_features(raw_buffer: list[float], fs: int) -> Optional[list[float]]:
+    def _extract_beat(raw_buffer: list[float], fs: int) -> Optional[np.ndarray]:
         """
-        Extract 32 ECG features from raw ADC buffer.
+        Extract and preprocess the most recent valid beat window from the buffer.
 
-        Uses a simplified approach: compute RR-interval statistics and
-        waveform morphology from the last detected beat pair.
-        Returns None if there is insufficient data.
+        Replicates M2/Preprocess.py exactly:
+          1. Bandpass filter  0.5 – 45 Hz  (Butterworth order 2, zero-phase)
+          2. Detect R-peaks   (scipy find_peaks, min distance 0.3 s)
+          3. Slice window     [peak - 90 : peak + 100]  → 190 samples
+          4. Z-score normalise
+
+        Returns a float32 array of shape (190,), or None if extraction fails.
         """
         try:
-            from scipy.signal import find_peaks, butter, filtfilt
+            from scipy.signal import butter, filtfilt, find_peaks
 
-            if len(raw_buffer) < fs * 5:   # need at least 5 seconds
+            # Need at least 3 seconds of data to detect reliable peaks
+            min_samples = int(fs * 3)
+            if len(raw_buffer) < min_samples:
                 return None
 
-            # Normalise
-            arr = np.array(raw_buffer[-fs * 10:], dtype=np.float64)
-            arr = (arr - arr.mean()) / (arr.std() + 1e-8)
+            arr = np.array(raw_buffer, dtype=np.float64)
 
-            # Bandpass filter 0.5–40 Hz
-            b, a = butter(4, [0.5 / (fs / 2), 40.0 / (fs / 2)], btype="band")
+            # ── Step 1: bandpass filter (matches Preprocess.py) ──
+            nyquist = 0.5 * fs
+            b, a = butter(2, [0.5 / nyquist, 45.0 / nyquist], btype="band")
             filtered = filtfilt(b, a, arr)
 
-            # Detect R-peaks
-            min_dist = int(0.5 * fs)
-            peaks, _ = find_peaks(filtered, distance=min_dist, height=0.5)
-            if len(peaks) < 3:
+            # ── Step 2: R-peak detection ──
+            min_dist = max(1, int(0.3 * fs))   # 0.3 s → up to ~200 BPM
+            peaks, _ = find_peaks(
+                filtered,
+                distance=min_dist,
+                height=np.mean(filtered),
+            )
+            if len(peaks) < 1:
                 return None
 
-            # Use last 3 beats to compute 2-lead–like features (replicated for lead 1 and lead 2)
-            rr_intervals = np.diff(peaks) / fs  # in seconds
+            # Use the last valid R-peak that has a full window around it
+            for peak in reversed(peaks):
+                start = peak - _WINDOW_BEFORE
+                end   = peak + _WINDOW_AFTER
+                if start >= 0 and end < len(filtered):
+                    segment = filtered[start:end]
+                    # ── Step 4: z-score normalise ──
+                    std = np.std(segment)
+                    if std == 0:
+                        normalised = segment - np.mean(segment)
+                    else:
+                        normalised = (segment - np.mean(segment)) / std
+                    return normalised.astype(np.float32)
 
-            def _beat_features(peak_idx: int) -> list[float]:
-                start = max(0, peak_idx - int(0.3 * fs))
-                end   = min(len(filtered), peak_idx + int(0.5 * fs))
-                segment = filtered[start:end]
-                if len(segment) < 10:
-                    return [0.0] * 16
-
-                r_peak  = float(filtered[peak_idx])
-                q_idx   = max(0, peak_idx - int(0.04 * fs))
-                s_idx   = min(len(filtered) - 1, peak_idx + int(0.04 * fs))
-                p_idx   = max(0, peak_idx - int(0.15 * fs))
-                t_idx   = min(len(filtered) - 1, peak_idx + int(0.3 * fs))
-
-                q_peak  = float(filtered[q_idx])
-                s_peak  = float(filtered[s_idx])
-                p_peak  = float(filtered[p_idx])
-                t_peak  = float(filtered[t_idx])
-
-                qrs_int = float(s_idx - q_idx) / fs
-                pq_int  = float(peak_idx - p_idx) / fs
-                qt_int  = float(t_idx - q_idx) / fs
-                st_int  = float(t_idx - s_idx) / fs
-
-                # QRS morphology: 5 equidistant samples in QRS window
-                morph_pts = np.linspace(q_idx, s_idx, 5, dtype=int)
-                morph = [float(filtered[i]) for i in morph_pts]
-
-                pre_rr  = float(rr_intervals[-2]) if len(rr_intervals) >= 2 else 0.0
-                post_rr = float(rr_intervals[-1]) if len(rr_intervals) >= 1 else 0.0
-
-                return [pre_rr, post_rr, p_peak, t_peak, r_peak, s_peak, q_peak,
-                        qrs_int, pq_int, qt_int, st_int] + morph  # 16 features
-
-            # Two "leads" using the last two detected beats
-            feat1 = _beat_features(peaks[-2])
-            feat2 = _beat_features(peaks[-1])
-
-            features = feat1 + feat2   # 32 total
-            if len(features) != 32:
-                return None
-            return features
+            return None
 
         except Exception as exc:
-            logger.debug("Feature extraction error: %s", exc)
+            logger.debug("Beat extraction error: %s", exc)
             return None
+
+    # ── Persistence ───────────────────────────────────────
 
     async def _persist(
         self,
