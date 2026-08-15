@@ -19,7 +19,7 @@ const initialState = {
   patientList: [],   // all registered patients (for selector)
   device: {
     connected:         true,
-    port:              'COM6',
+    port:              'WiFi (ESP32)',
     samplingRate:      '250 Hz',
     signalQuality:     92,
     monitoringDuration:'00:00:00',

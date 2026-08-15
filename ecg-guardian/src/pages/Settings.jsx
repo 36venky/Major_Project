@@ -213,19 +213,16 @@ export default function Settings() {
         {/* Device Configuration */}
         <Card
           title="Device Configuration"
-          subtitle="COM port and sampling settings"
+          subtitle="ESP32 WiFi connection and sampling settings"
           action={<Cpu className="w-4 h-4 text-slate-400" />}
         >
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-slate-500 font-medium block mb-1">COM Port</label>
-              <select className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/30">
-                <option>COM6</option>
-                <option>COM3</option>
-                <option>COM4</option>
-                <option>COM5</option>
-              </select>
-              <p className="text-[10px] text-slate-400 mt-1">Port is managed by the Python backend</p>
+              <label className="text-xs text-slate-500 font-medium block mb-1">Device Connection</label>
+              <div className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-600 bg-slate-50 select-none">
+                WiFi — ESP32 WebSocket (<code className="text-xs text-blue-600">/ws/device</code>)
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">ESP32 connects to the backend over WiFi — no COM port required</p>
             </div>
             <div>
               <label className="text-xs text-slate-500 font-medium block mb-1">Sampling Rate</label>
@@ -235,8 +232,8 @@ export default function Settings() {
                 <option>1000 Hz</option>
               </select>
             </div>
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <p className="text-xs text-amber-700 font-medium">⚠ Device settings are controlled by the FastAPI backend. Changes here are UI preferences only.</p>
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-xs text-blue-700 font-medium">ℹ Device settings are controlled by the FastAPI backend. If no ESP32 is connected, a synthetic ECG waveform is generated automatically.</p>
             </div>
           </div>
         </Card>
