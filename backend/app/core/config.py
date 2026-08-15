@@ -70,13 +70,10 @@ class Settings(BaseSettings):
     HOST: str = _get("server.host", "0.0.0.0")
     PORT: int = _get("server.port", 8000)
 
-    # ── Serial ─────────────────────────────────────────────
-    SERIAL_PORT: str           = _get("serial.port",                "COM6")
-    BAUD_RATE: int             = _get("serial.baud_rate",           9600)
-    SERIAL_TIMEOUT: float      = _get("serial.timeout",             1.0)
-    RECONNECT_INTERVAL: int    = _get("serial.reconnect_interval",  5)
-    MOCK_WHEN_UNAVAILABLE: bool= _get("serial.mock_when_unavailable", True)
-    SAMPLING_RATE: int         = _get("serial.sampling_rate",       250)
+    # ── Device (ESP32 WiFi) ────────────────────────────────
+    MOCK_WHEN_UNAVAILABLE: bool = _get("device.mock_when_unavailable", True)
+    MOCK_CONNECT_TIMEOUT: float = _get("device.mock_connect_timeout",  10.0)
+    SAMPLING_RATE: int          = _get("device.sampling_rate",         250)
 
     # ── Database ───────────────────────────────────────────
     DATABASE_PATH: str = _get("database.path", "data/ecg_guardian.db")

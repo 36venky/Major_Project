@@ -13,9 +13,6 @@ aiosqlite==0.20.0
 pydantic==2.10.3
 pydantic-settings==2.7.0
 
-# Serial communication
-pyserial==3.5
-
 # Signal processing
 numpy==2.2.1
 scipy==1.14.1

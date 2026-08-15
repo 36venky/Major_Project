@@ -140,6 +140,8 @@ class TwilioWhatsAppService:
         guardian_phone:    Optional[str],
         emergency_contact: Optional[str] = None,
         phone:             Optional[str] = None,
+        doctor_phone:      Optional[str] = None,
+        ambulance_phone:   Optional[str] = None,
         alert_type:        str,
         severity:          str,
         ecg_status:        str,
@@ -195,6 +197,8 @@ class TwilioWhatsAppService:
                 risk_level=risk_level,
                 alert_message=alert_message,
                 timestamp=timestamp,
+                doctor_phone=doctor_phone,
+                ambulance_phone=ambulance_phone,
                 on_result=on_result,
             )
         )
@@ -204,16 +208,18 @@ class TwilioWhatsAppService:
     async def _dispatch_all(
         self,
         *,
-        patient_id:    str,
-        patient_name:  str,
-        recipients:    list[str],
-        alert_type:    str,
-        severity:      str,
-        ecg_status:    str,
-        risk_level:    str,
-        alert_message: str,
-        timestamp:     datetime,
-        on_result:     Optional[callable],
+        patient_id:      str,
+        patient_name:    str,
+        recipients:      list[str],
+        alert_type:      str,
+        severity:        str,
+        ecg_status:      str,
+        risk_level:      str,
+        alert_message:   str,
+        timestamp:       datetime,
+        doctor_phone:    Optional[str] = None,
+        ambulance_phone: Optional[str] = None,
+        on_result:       Optional[callable],
     ) -> None:
         """Send to every recipient concurrently and collect results."""
         body = self._build_message(
@@ -223,6 +229,8 @@ class TwilioWhatsAppService:
             ecg_status=ecg_status,
             alert_message=alert_message,
             severity=severity,
+            doctor_phone=doctor_phone,
+            ambulance_phone=ambulance_phone,
         )
 
         tasks = [
@@ -246,23 +254,53 @@ class TwilioWhatsAppService:
     def _build_message(
         self,
         *,
-        patient_name:  str,
-        timestamp:     datetime,
-        risk_level:    str,
-        ecg_status:    str,
-        alert_message: str,
-        severity:      str,
+        patient_name:    str,
+        timestamp:       datetime,
+        risk_level:      str,
+        ecg_status:      str,
+        alert_message:   str,
+        severity:        str,
+        doctor_phone:    Optional[str] = None,
+        ambulance_phone: Optional[str] = None,
     ) -> str:
-        recommendation = _RECOMMENDATIONS.get(severity, "Please consult a healthcare professional.")
-        ts_str = timestamp.strftime("%Y-%m-%d %H:%M UTC")
+        ts_str     = timestamp.strftime("%d %B %Y, %I:%M %p UTC")
+        risk_label = _RISK_LABELS.get(risk_level, risk_level.upper())
+
+        # Severity-specific action line
+        if severity == "critical":
+            action_line = (
+                "⚠️ *IMMEDIATE ACTION REQUIRED* — This is a critical cardiac alert. "
+                "Please ensure the patient receives emergency medical attention without delay."
+            )
+        else:
+            action_line = (
+                "Please review the patient's condition and consult the attending physician "
+                "at the earliest convenience."
+            )
+
+        # Emergency contacts block (only shown when numbers are configured)
+        emergency_lines = ""
+        if doctor_phone:
+            emergency_lines += f"\n📞 *Doctor:* {doctor_phone}"
+        if ambulance_phone:
+            emergency_lines += f"\n🚑 *Ambulance:* {ambulance_phone}"
+        if emergency_lines:
+            emergency_lines = "\n" + emergency_lines.strip()
+
         return (
-            f"🚨 *ECG Guardian Alert*\n\n"
-            f"*Patient:* {patient_name}\n"
-            f"*Time:* {ts_str}\n"
-            f"*Risk Level:* {_RISK_LABELS.get(risk_level, risk_level)}\n"
-            f"*ECG Status:* {ecg_status}\n"
-            f"*Alert:* {alert_message}\n"
-            f"*Recommendation:* {recommendation}"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🏥 *ECG Guardian — Medical Alert*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"*Patient Name:*  {patient_name}\n"
+            f"*Alert Time:*    {ts_str}\n"
+            f"*Risk Level:*    {risk_label}\n"
+            f"*ECG Status:*    {ecg_status}\n"
+            f"*Alert Detail:*  {alert_message}\n"
+            f"\n{action_line}"
+            f"{emergency_lines}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"_This is an automated notification from ECG Guardian Remote Cardiac "
+            f"Monitoring System. Do not reply to this message._"
         )
 
     async def _send_with_retry(

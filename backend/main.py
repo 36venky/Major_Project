@@ -155,6 +155,8 @@ def create_app() -> FastAPI:
     app.include_router(ws_router)
     app.include_router(dashboard_router)
     app.include_router(risk_router)
+    # ESP32 WiFi device endpoint (/ws/device) — owned by WiFiManager via ECGService
+    app.include_router(ecg_service.device_router)
 
     # ── Global exception handlers ─────────────────────────
 

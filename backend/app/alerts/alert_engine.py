@@ -186,6 +186,6 @@ class AlertEngine:
             self._fire(AlertEvent(
                 alert_type="DEVICE_DISCONNECT",
                 severity="critical",
-                message=f"Device disconnected from {settings.SERIAL_PORT}.",
+                message="ESP32 device disconnected (WiFi).",
                 patient_id=self._patient_id,
             ))

@@ -50,11 +50,14 @@ class Patient(Base):
     # Extended fields (Feature 2)
     phone: Mapped[str | None]         = mapped_column(String(30), nullable=True)
     emergency_contact: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    diseases: Mapped[str | None]      = mapped_column(Text, nullable=True)
-    medications: Mapped[str | None]   = mapped_column(Text, nullable=True)
-    allergies: Mapped[str | None]     = mapped_column(Text, nullable=True)
-    address: Mapped[str | None]       = mapped_column(Text, nullable=True)
+    diseases: Mapped[str | None]         = mapped_column(Text, nullable=True)
+    medications: Mapped[str | None]      = mapped_column(Text, nullable=True)
+    allergies: Mapped[str | None]        = mapped_column(Text, nullable=True)
+    address: Mapped[str | None]          = mapped_column(Text, nullable=True)
     registration_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Emergency services (Feature 4 – formal alerts)
+    doctor_phone: Mapped[str | None]     = mapped_column(String(30), nullable=True)
+    ambulance_phone: Mapped[str | None]  = mapped_column(String(30), nullable=True)
     created_at: Mapped[datetime]      = mapped_column(DateTime(timezone=True), default=_now)
 
     # Relationships

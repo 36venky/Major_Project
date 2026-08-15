@@ -30,7 +30,7 @@ from app.processing.arrhythmia import ArrhythmiaResult, classify
 from app.processing.heart_rate import RollingBPMEstimator
 from app.processing.signal_filter import full_filter_pipeline
 from app.processing.signal_quality import SignalQualityResult, assess_signal_quality
-from app.serial.serial_manager import SerialManager
+from app.serial.wifi_manager import WiFiManager
 
 logger = get_logger("app.ecg_service")
 
@@ -61,7 +61,7 @@ class ECGService:
         self._current_risk:       Optional[dict]            = None  # latest risk prediction
 
         self._ws_connections: Set[WebSocket] = set()
-        self._serial_manager = SerialManager(on_sample=self._on_sample)
+        self._wifi_manager = WiFiManager(on_sample=self._on_sample)
 
         self._db_flush_task:   Optional[asyncio.Task] = None
         self._broadcast_task:  Optional[asyncio.Task] = None
@@ -71,7 +71,7 @@ class ECGService:
 
     async def start(self) -> None:
         logger.info("ECGService starting…")
-        await self._serial_manager.start()
+        await self._wifi_manager.start()
         self._db_flush_task  = asyncio.create_task(self._db_flush_loop(),  name="db_flush")
         self._broadcast_task = asyncio.create_task(self._broadcast_loop(), name="ws_broadcast")
         self._analysis_task  = asyncio.create_task(self._analysis_loop(),  name="ecg_analysis")
@@ -82,7 +82,7 @@ class ECGService:
         logger.info("ECGService stopping…")
         if self._session_id:
             await self._close_session()
-        await self._serial_manager.stop()
+        await self._wifi_manager.stop()
         for task in (self._db_flush_task, self._broadcast_task, self._analysis_task):
             if task and not task.done():
                 task.cancel()
@@ -213,7 +213,7 @@ class ECGService:
                         bpm=self._current_bpm,
                         quality=self._current_quality,
                         arrhythmia=self._current_arrhythmia,
-                        device_connected=self._serial_manager.is_connected,
+                        device_connected=self._wifi_manager.is_connected,
                     )
 
                 # Run ML risk prediction (Feature 5)
@@ -328,7 +328,7 @@ class ECGService:
                 f"*Patient:* {patient.name}\n"
                 f"*Session ID:* {self._session_id}\n"
                 f"*Started at:* {ts_str}\n"
-                f"*Device:* {settings.SERIAL_PORT} @ {settings.SAMPLING_RATE} Hz\n\n"
+                f"*Device:* WiFi @ {settings.SAMPLING_RATE} Hz\n\n"
                 f"Real-time ECG monitoring is now active. "
                 f"You will receive alerts if any critical conditions are detected.\n\n"
                 f"_ECG Guardian \u2014 Remote Cardiac Monitoring_"
@@ -474,6 +474,8 @@ class ECGService:
                     guardian_phone    = patient.guardian_phone,
                     emergency_contact = patient.emergency_contact,
                     phone             = patient.phone,
+                    doctor_phone      = getattr(patient, "doctor_phone", None),
+                    ambulance_phone   = getattr(patient, "ambulance_phone", None),
                     alert_type        = event.alert_type,
                     severity          = event.severity,
                     ecg_status        = event.alert_type,
@@ -500,9 +502,14 @@ class ECGService:
     @property
     def is_monitoring(self) -> bool:          return self._is_monitoring
     @property
-    def is_connected(self) -> bool:           return self._serial_manager.is_connected
+    def is_connected(self) -> bool:           return self._wifi_manager.is_connected
     @property
     def active_patient_id(self) -> Optional[str]: return self._patient_id
+
+    @property
+    def device_router(self):
+        """FastAPI router that owns /ws/device — register in main.py."""
+        return self._wifi_manager.router
 
     def get_live_ecg_window(self, n: int = 250) -> list[float]:
         return list(self._raw_buffer)[-n:]

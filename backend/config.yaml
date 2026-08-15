@@ -12,14 +12,11 @@ server:
   port: 8000
   reload: true
 
-# Serial / Hardware
-serial:
-  port: "COM6"
-  baud_rate: 9600
-  timeout: 1.0
-  reconnect_interval: 5      # seconds between reconnect attempts
-  mock_when_unavailable: true # use synthetic ECG generator if COM unavailable
-  sampling_rate: 250          # Hz – samples per second
+# Device (ESP32 WiFi WebSocket)
+device:
+  mock_when_unavailable: true  # generate synthetic ECG when no ESP32 is connected
+  mock_connect_timeout: 10.0   # seconds to wait for ESP32 before starting mock
+  sampling_rate: 250           # Hz – expected sample rate from ESP32
 
 # Database
 database:

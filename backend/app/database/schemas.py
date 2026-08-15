@@ -47,6 +47,8 @@ class PatientBase(BaseModel):
     allergies:         Optional[str] = None
     address:           Optional[str] = None
     registration_date: Optional[datetime] = None
+    doctor_phone:      Optional[str] = None
+    ambulance_phone:   Optional[str] = None
 
 
 class PatientCreate(PatientBase):
@@ -68,6 +70,8 @@ class PatientUpdate(BaseModel):
     medications:       Optional[str] = None
     allergies:         Optional[str] = None
     address:           Optional[str] = None
+    doctor_phone:      Optional[str] = None
+    ambulance_phone:   Optional[str] = None
 
 
 class PatientResponse(_ORMBase, PatientBase):
