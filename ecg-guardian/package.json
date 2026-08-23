@@ -10,11 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.24.0",
     "plotly.js-dist": "^3.7.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-is": "^19.2.7",
+    "react-leaflet": "^5.0.0",
     "react-plotly.js": "^4.0.0",
     "react-router-dom": "^7.18.1",
     "recharts": "^3.9.2",

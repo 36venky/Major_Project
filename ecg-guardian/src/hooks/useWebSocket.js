@@ -64,8 +64,9 @@ export function useWebSocket() {
   const connect = useCallback(async () => {
     if (stoppedRef.current) return;
 
-    let token = null;
-    try { token = await getToken(); } catch { /* fall through */ }
+    // getToken() is now synchronous — no auto-login.
+    // If no token exists the user hasn't logged in yet; start simulator.
+    const token = getToken();
 
     if (!token) {
       startSimulator();

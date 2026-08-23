@@ -1,17 +1,10 @@
 /**
  * Dashboard – Main overview page.
  *
- * Changes from original:
- *  - DeviceCard removed (Feature 3)
- *  - 3-column info card grid: PatientCard | HeartRateCard | WeeklyHealthCard
- *  - "Add Patient" button + AddPatientModal (Feature 2)
- *  - PatientSelector dropdown (Feature 2)
- *  - ECGCanvas → LiveECGChart with Plotly (Feature 1)
- *  - RiskCard + RiskChart added (Feature 5)
+ * "Add Patient" button removed — patients are now registered
+ * through the /register onboarding wizard.
+ * PatientSelector remains so the user can switch between existing patients.
  */
-import { useState } from 'react';
-import { UserPlus } from 'lucide-react';
-
 import PatientCard      from '../components/PatientCard';
 import HeartRateCard    from '../components/HeartRateCard';
 import WeeklyHealthCard from '../components/WeeklyHealthCard';
@@ -22,12 +15,9 @@ import Timeline         from '../components/Timeline';
 import RiskCard         from '../components/RiskCard';
 import RiskChart        from '../components/RiskChart';
 import Card             from '../components/Card';
-import AddPatientModal  from '../components/AddPatientModal';
 import PatientSelector  from '../components/PatientSelector';
 
 export default function Dashboard() {
-  const [showAddModal, setShowAddModal] = useState(false);
-
   return (
     <div className="space-y-6">
 
@@ -38,22 +28,11 @@ export default function Dashboard() {
           <p className="text-sm text-slate-400 mt-0.5">Real-time ECG monitoring overview</p>
         </div>
 
-        {/* Patient controls */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <PatientSelector />
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold
-              bg-blue-600 text-white rounded-lg hover:bg-blue-700
-              active:scale-95 transition-all shadow-sm"
-          >
-            <UserPlus className="w-4 h-4" />
-            Add Patient
-          </button>
-        </div>
+        {/* Patient selector */}
+        <PatientSelector />
       </div>
 
-      {/* Info cards — 3 columns (DeviceCard removed) */}
+      {/* Info cards — 3 columns */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         <PatientCard />
         <HeartRateCard />
@@ -90,10 +69,6 @@ export default function Dashboard() {
         <Timeline />
       </div>
 
-      {/* Add Patient Modal */}
-      {showAddModal && (
-        <AddPatientModal onClose={() => setShowAddModal(false)} />
-      )}
     </div>
   );
 }

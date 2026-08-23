@@ -1,10 +1,18 @@
 /**
  * AppContext – Global application state.
- * Added: riskPrediction, patientList, ADD_PATIENT_TO_LIST, SET_RISK_PREDICTION
+ *
+ * authUser now stores the full profile from /auth/profile:
+ *   { username, role, full_name, email, phone, specialization, hospital, city, country }
+ *
+ * LOGOUT action clears authUser and resets patient state.
  */
 import { createContext, useContext, useReducer, useCallback, useRef } from 'react';
+import { getUserInfo } from '../services/auth';
+
+const _savedUser = getUserInfo();
 
 const initialState = {
+  authUser: _savedUser || null,  // { username, role, full_name } or null
   patient: {
     id:               'P-001',
     name:             'Arjun Sharma',
@@ -15,6 +23,9 @@ const initialState = {
     weight:           '74 kg',
     guardianName:     'Priya Sharma',
     emergencyContact: '+91 98765 43210',
+    location:         null,   // "lat,lng" string or null
+    locationAddress:  null,
+    mapsLink:         null,
   },
   patientList: [],   // all registered patients (for selector)
   device: {
@@ -140,6 +151,17 @@ function appReducer(state, action) {
 
     case 'CLEAR_NOTIFICATION':
       return { ...state, notifications: state.notifications.filter(n => n.id !== action.payload) };
+
+    case 'SET_AUTH_USER':
+      return { ...state, authUser: action.payload };
+
+    case 'LOGOUT':
+      return {
+        ...initialState,
+        authUser: null,
+        // keep device / monitoring defaults, only clear user-specific data
+        patientList: [],
+      };
 
     default:
       return state;

@@ -1,16 +1,20 @@
 /**
  * TopBar – Top navigation bar.
- * Shows patient name, connection status, live clock, notifications, and user profile.
+ * Shows patient name, connection status, live clock, notifications, and user profile with logout.
  */
 import { useState, useEffect } from 'react';
-import { Bell, User, Wifi, WifiOff } from 'lucide-react';
+import { Bell, User, Wifi, WifiOff, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { clearToken } from '../services/auth';
 import { formatTime } from '../utils/helpers';
 
 export default function TopBar() {
   const { state, dispatch } = useApp();
+  const navigate = useNavigate();
   const [now, setNow] = useState(new Date());
   const [notifOpen, setNotifOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   // Live clock
   useEffect(() => {
@@ -19,6 +23,13 @@ export default function TopBar() {
   }, []);
 
   const unread = state.notifications.length;
+  const user   = state.authUser;
+
+  const handleLogout = () => {
+    clearToken();
+    dispatch({ type: 'LOGOUT' });
+    navigate('/login', { replace: true });
+  };
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center px-6 gap-4 shrink-0">
@@ -98,10 +109,37 @@ export default function TopBar() {
         )}
       </div>
 
-      {/* User profile */}
-      <button className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors">
-        <User className="w-4 h-4" />
-      </button>
+      {/* User profile + logout */}
+      <div className="relative">
+        <button
+          onClick={() => setProfileOpen(p => !p)}
+          className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center
+                     text-slate-600 hover:bg-slate-200 transition-colors"
+        >
+          <User className="w-4 h-4" />
+        </button>
+
+        {profileOpen && (
+          <div className="absolute right-0 top-11 w-52 bg-white rounded-xl shadow-xl
+                          border border-slate-200 z-50 py-2">
+            {user && (
+              <div className="px-4 py-2 border-b border-slate-100">
+                <p className="text-sm font-semibold text-slate-700">{user.full_name}</p>
+                <p className="text-xs text-slate-400">{user.email || user.username}</p>
+                <p className="text-xs text-blue-500 capitalize mt-0.5">{user.role}</p>
+              </div>
+            )}
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600
+                         hover:bg-red-50 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out
+            </button>
+          </div>
+        )}
+      </div>
     </header>
   );
 }

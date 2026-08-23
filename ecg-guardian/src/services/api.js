@@ -23,6 +23,11 @@ async function request(method, path, body) {
 export const getPatient    = (id)       => request('GET', `/patients/${id}`);
 export const updatePatient = (id, data) => request('PUT', `/patients/${id}`, data);
 
+/* ── Patient Location ───────────────────────────────────── */
+export const getLocation   = (id)       => request('GET',    `/patients/${id}/location`);
+export const saveLocation  = (id, data) => request('PUT',    `/patients/${id}/location`, data);
+export const clearLocation = (id)       => request('DELETE', `/patients/${id}/location`);
+
 /* ── Alerts ─────────────────────────────────────────────── */
 export const getAlerts          = (patientId) => request('GET',  `/alerts?patient_id=${patientId}`);
 export const sendWhatsAppReport = (patientId) => request('POST', '/alerts/send-report', { patient_id: patientId });
