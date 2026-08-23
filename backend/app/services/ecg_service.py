@@ -323,12 +323,16 @@ class ECGService:
                 return
 
             ts_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            location_line = ""
+            if getattr(patient, "maps_link", None):
+                location_line = f"\n📍 *Patient Location:* {patient.maps_link}"
             body = (
                 f"\u2705 *ECG Guardian \u2013 Monitoring Started*\n\n"
                 f"*Patient:* {patient.name}\n"
                 f"*Session ID:* {self._session_id}\n"
                 f"*Started at:* {ts_str}\n"
-                f"*Device:* WiFi @ {settings.SAMPLING_RATE} Hz\n\n"
+                f"*Device:* WiFi @ {settings.SAMPLING_RATE} Hz"
+                f"{location_line}\n\n"
                 f"Real-time ECG monitoring is now active. "
                 f"You will receive alerts if any critical conditions are detected.\n\n"
                 f"_ECG Guardian \u2014 Remote Cardiac Monitoring_"
@@ -476,6 +480,7 @@ class ECGService:
                     phone             = patient.phone,
                     doctor_phone      = getattr(patient, "doctor_phone", None),
                     ambulance_phone   = getattr(patient, "ambulance_phone", None),
+                    maps_link         = getattr(patient, "maps_link", None),
                     alert_type        = event.alert_type,
                     severity          = event.severity,
                     ecg_status        = event.alert_type,

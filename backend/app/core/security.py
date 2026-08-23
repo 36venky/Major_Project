@@ -3,6 +3,9 @@ core/security.py
 ────────────────
 JWT authentication and password hashing utilities.
 
+Users are now stored in the database (users table).
+The old hardcoded _USERS dict has been removed.
+
 Roles:
   - admin    : Full access
   - doctor   : Read + write patient data, generate reports
@@ -33,8 +36,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 # ── Token payload model ───────────────────────────────────
 class TokenData(BaseModel):
-    sub: str               # username / user id
+    sub: str               # username
     role: str = "guardian"
+    user_id: Optional[int] = None
     exp: Optional[datetime] = None
 
 
@@ -48,29 +52,6 @@ def hash_password(plain: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     """Verify a plain-text password against its bcrypt hash."""
     return _bcrypt_lib.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
-
-
-# ── Default users (replace with DB-backed user store in production) ─
-_USERS: dict[str, dict] = {
-    "admin": {
-        "username": "admin",
-        "hashed_password": hash_password("admin123"),
-        "role": "admin",
-        "full_name": "System Administrator",
-    },
-    "doctor": {
-        "username": "doctor",
-        "hashed_password": hash_password("doctor123"),
-        "role": "doctor",
-        "full_name": "Dr. Ramesh Kumar",
-    },
-    "guardian": {
-        "username": "guardian",
-        "hashed_password": hash_password("guardian123"),
-        "role": "guardian",
-        "full_name": "Priya Sharma",
-    },
-}
 
 
 # ── Token creation ────────────────────────────────────────
@@ -124,28 +105,13 @@ def decode_token(token: str) -> TokenData:
         )
         sub: Optional[str] = payload.get("sub")
         role: str = payload.get("role", "guardian")
+        user_id: Optional[int] = payload.get("user_id")
         if sub is None:
             raise credentials_exc
-        return TokenData(sub=sub, role=role)
+        return TokenData(sub=sub, role=role, user_id=user_id)
     except JWTError as exc:
         logger.warning("JWT validation failed: %s", exc)
         raise credentials_exc
-
-
-# ── User lookup ───────────────────────────────────────────
-
-def authenticate_user(username: str, password: str) -> Optional[dict]:
-    """
-    Verify username and password against the user store.
-
-    Returns the user dict on success, None on failure.
-    """
-    user = _USERS.get(username)
-    if not user:
-        return None
-    if not verify_password(password, user["hashed_password"]):
-        return None
-    return user
 
 
 # ── FastAPI Dependencies ──────────────────────────────────

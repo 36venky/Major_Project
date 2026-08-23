@@ -39,6 +39,7 @@ from app.api.reports       import router as reports_router
 from app.api.websocket     import router as ws_router
 from app.api.patient_route import router as dashboard_router
 from app.api.risk          import router as risk_router
+from app.api.location      import router as location_router
 
 logger = get_logger("app.main")
 
@@ -69,7 +70,8 @@ async def lifespan(app: FastAPI):
     # 1. Database
     await init_db()
 
-    # 2. Seed default patient
+    # 2. Seed default admin user and demo patient
+    await _seed_default_admin()
     await _seed_default_patient()
 
     # 3. ECG service
@@ -90,6 +92,39 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
     await close_db()
     logger.info("Shutdown complete.")
+
+
+async def _seed_default_admin() -> None:
+    """
+    Create a default admin account on first startup so the app is usable
+    without needing to register first.
+
+    Default credentials:
+      username : admin
+      password : admin123
+      role     : admin
+
+    These are printed as a warning so operators change them immediately.
+    """
+    from app.database.database import AsyncSessionLocal
+    from app.database import crud
+    from app.core.security import hash_password
+
+    async with AsyncSessionLocal() as db:
+        if not await crud.username_exists(db, "admin"):
+            await crud.create_user(db, {
+                "username":        "admin",
+                "email":           "admin@ecgguardian.local",
+                "hashed_password": hash_password("admin123"),
+                "full_name":       "System Administrator",
+                "role":            "admin",
+                "is_active":       True,
+            })
+            await db.commit()
+            logger.warning(
+                "⚠  Default admin account created  (username=admin  password=admin123). "
+                "Change this immediately in production!"
+            )
 
 
 async def _seed_default_patient() -> None:
@@ -155,6 +190,7 @@ def create_app() -> FastAPI:
     app.include_router(ws_router)
     app.include_router(dashboard_router)
     app.include_router(risk_router)
+    app.include_router(location_router)
     # ESP32 WiFi device endpoint (/ws/device) — owned by WiFiManager via ECGService
     app.include_router(ecg_service.device_router)
 

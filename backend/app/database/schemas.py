@@ -49,6 +49,10 @@ class PatientBase(BaseModel):
     registration_date: Optional[datetime] = None
     doctor_phone:      Optional[str] = None
     ambulance_phone:   Optional[str] = None
+    # Location (Feature 7)
+    location:          Optional[str] = None   # "lat,lng"
+    location_address:  Optional[str] = None
+    maps_link:         Optional[str] = None
 
 
 class PatientCreate(PatientBase):
@@ -72,6 +76,9 @@ class PatientUpdate(BaseModel):
     address:           Optional[str] = None
     doctor_phone:      Optional[str] = None
     ambulance_phone:   Optional[str] = None
+    location:          Optional[str] = None
+    location_address:  Optional[str] = None
+    maps_link:         Optional[str] = None
 
 
 class PatientResponse(_ORMBase, PatientBase):
@@ -186,12 +193,52 @@ class DoctorNoteResponse(_ORMBase):
 
 
 # ────────────────────────────────────────────────────────────
-# Auth
+# Auth / User
 # ────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class RegisterRequest(BaseModel):
+    # Account credentials
+    username:        str = Field(..., min_length=3, max_length=80)
+    email:           str = Field(..., max_length=200)
+    password:        str = Field(..., min_length=6, max_length=128)
+    confirm_password: str = Field(..., min_length=6, max_length=128)
+    # Personal details
+    full_name:       str = Field(..., min_length=2, max_length=150)
+    role:            str = Field(default="guardian")   # guardian | doctor | admin
+    phone:           Optional[str] = Field(None, max_length=30)
+    # Professional details (mostly for doctors)
+    specialization:  Optional[str] = Field(None, max_length=120)
+    hospital:        Optional[str] = Field(None, max_length=200)
+    license_number:  Optional[str] = Field(None, max_length=80)
+    # Address
+    address:         Optional[str] = None
+    city:            Optional[str] = Field(None, max_length=100)
+    state:           Optional[str] = Field(None, max_length=100)
+    country:         Optional[str] = Field(None, max_length=100)
+
+
+class UserResponse(_ORMBase):
+    id:             int
+    username:       str
+    email:          str
+    full_name:      str
+    role:           str
+    phone:          Optional[str] = None
+    specialization: Optional[str] = None
+    hospital:       Optional[str] = None
+    license_number: Optional[str] = None
+    address:        Optional[str] = None
+    city:           Optional[str] = None
+    state:          Optional[str] = None
+    country:        Optional[str] = None
+    is_active:      bool
+    created_at:     datetime
+    last_login:     Optional[datetime] = None
 
 
 class TokenResponse(BaseModel):
@@ -202,9 +249,15 @@ class TokenResponse(BaseModel):
 
 
 class UserProfileResponse(BaseModel):
-    username:  str
-    role:      str
-    full_name: str
+    username:       str
+    role:           str
+    full_name:      str
+    email:          Optional[str]  = None
+    phone:          Optional[str]  = None
+    specialization: Optional[str]  = None
+    hospital:       Optional[str]  = None
+    city:           Optional[str]  = None
+    country:        Optional[str]  = None
 
 
 # ────────────────────────────────────────────────────────────
@@ -258,3 +311,21 @@ class AlertLogResponse(_ORMBase):
     recipient:     str
     status:        str
     error_message: Optional[str] = None
+
+
+# ────────────────────────────────────────────────────────────
+# Patient Location
+# ────────────────────────────────────────────────────────────
+
+class LocationUpsert(BaseModel):
+    latitude:         float = Field(..., ge=-90.0,   le=90.0)
+    longitude:        float = Field(..., ge=-180.0,  le=180.0)
+    location_address: Optional[str] = Field(None, max_length=500)
+
+
+class LocationResponse(BaseModel):
+    patient_id:       str
+    latitude:         Optional[float] = None
+    longitude:        Optional[float] = None
+    location_address: Optional[str]   = None
+    maps_link:        Optional[str]   = None

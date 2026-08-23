@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logger import get_logger
 from app.database.models import (
     Alert, AlertLog, DoctorNote, ECGSample, ECGSession,
-    HeartRate, Patient, RiskPrediction, WeeklyHealth,
+    HeartRate, Patient, RiskPrediction, User, WeeklyHealth,
 )
 
 logger = get_logger("database.crud")
@@ -470,3 +470,91 @@ async def get_alert_logs(
         .limit(limit)
     )
     return result.scalars().all()
+
+
+# ────────────────────────────────────────────────────────────
+# User CRUD
+# ────────────────────────────────────────────────────────────
+
+async def create_user(db: AsyncSession, data: dict) -> User:
+    """Insert a new user account. `data` must include hashed_password (not plain)."""
+    user = User(**data)
+    db.add(user)
+    await db.flush()
+    logger.info("Created user '%s' (role=%s)", user.username, user.role)
+    return user
+
+
+async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
+    """Fetch a user by primary key."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User]:
+    """Fetch a user by username (case-insensitive)."""
+    result = await db.execute(
+        select(User).where(func.lower(User.username) == username.lower())
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
+    """Fetch a user by email address (case-insensitive)."""
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == email.lower())
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_all_users(db: AsyncSession) -> Sequence[User]:
+    """Return all users ordered by creation date."""
+    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    return result.scalars().all()
+
+
+async def update_user(db: AsyncSession, user_id: int, data: dict) -> Optional[User]:
+    """Partially update a user record (skips None values)."""
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return None
+    for key, value in data.items():
+        if value is not None:
+            setattr(user, key, value)
+    await db.flush()
+    return user
+
+
+async def update_last_login(db: AsyncSession, user_id: int) -> None:
+    """Stamp the last_login field to now (called on every successful login)."""
+    await db.execute(
+        update(User).where(User.id == user_id).values(last_login=_utcnow())
+    )
+    await db.flush()
+
+
+async def delete_user(db: AsyncSession, user_id: int) -> bool:
+    """Hard-delete a user account."""
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return False
+    await db.delete(user)
+    await db.flush()
+    logger.info("Deleted user id=%d", user_id)
+    return True
+
+
+async def username_exists(db: AsyncSession, username: str) -> bool:
+    """Return True if username is already taken."""
+    result = await db.execute(
+        select(func.count(User.id)).where(func.lower(User.username) == username.lower())
+    )
+    return (result.scalar() or 0) > 0
+
+
+async def email_exists(db: AsyncSession, email: str) -> bool:
+    """Return True if email is already registered."""
+    result = await db.execute(
+        select(func.count(User.id)).where(func.lower(User.email) == email.lower())
+    )
+    return (result.scalar() or 0) > 0

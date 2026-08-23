@@ -31,6 +31,35 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# ── Users ────────────────────────────────────────────────
+
+class User(Base):
+    """Application user account (doctor / guardian / admin)."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int]                    = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str]              = mapped_column(String(80), unique=True, nullable=False, index=True)
+    email: Mapped[str]                 = mapped_column(String(200), unique=True, nullable=False, index=True)
+    hashed_password: Mapped[str]       = mapped_column(String(200), nullable=False)
+    full_name: Mapped[str]             = mapped_column(String(150), nullable=False)
+    role: Mapped[str]                  = mapped_column(String(30), nullable=False, default="guardian")
+    phone: Mapped[str | None]          = mapped_column(String(30), nullable=True)
+    # Professional details
+    specialization: Mapped[str | None] = mapped_column(String(120), nullable=True)   # e.g. "Cardiologist"
+    hospital: Mapped[str | None]       = mapped_column(String(200), nullable=True)
+    license_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Address / contact
+    address: Mapped[str | None]        = mapped_column(Text, nullable=True)
+    city: Mapped[str | None]           = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None]          = mapped_column(String(100), nullable=True)
+    country: Mapped[str | None]        = mapped_column(String(100), nullable=True)
+    # Account state
+    is_active: Mapped[bool]            = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime]       = mapped_column(DateTime(timezone=True), default=_now)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 # ── Patients ──────────────────────────────────────────────
 
 class Patient(Base):
@@ -58,6 +87,10 @@ class Patient(Base):
     # Emergency services (Feature 4 – formal alerts)
     doctor_phone: Mapped[str | None]     = mapped_column(String(30), nullable=True)
     ambulance_phone: Mapped[str | None]  = mapped_column(String(30), nullable=True)
+    # Location (Feature 7 – patient location management)
+    location: Mapped[str | None]         = mapped_column(Text, nullable=True)  # "lat,lng" e.g. "12.9716,77.5946"
+    location_address: Mapped[str | None] = mapped_column(Text, nullable=True)  # human-readable address
+    maps_link: Mapped[str | None]        = mapped_column(Text, nullable=True)  # Google Maps URL
     created_at: Mapped[datetime]      = mapped_column(DateTime(timezone=True), default=_now)
 
     # Relationships

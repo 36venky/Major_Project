@@ -72,8 +72,22 @@ async def init_db() -> None:
     # For each new column we attempt ALTER TABLE and silently ignore the
     # "duplicate column name" error that SQLite raises if it already exists.
     _migrations = [
+        # patients table — columns added after initial schema
         "ALTER TABLE patients ADD COLUMN doctor_phone    VARCHAR(30)",
         "ALTER TABLE patients ADD COLUMN ambulance_phone VARCHAR(30)",
+        "ALTER TABLE patients ADD COLUMN location         TEXT",
+        "ALTER TABLE patients ADD COLUMN location_address TEXT",
+        "ALTER TABLE patients ADD COLUMN maps_link        TEXT",
+        # users table — columns added after initial schema
+        "ALTER TABLE users ADD COLUMN phone           VARCHAR(30)",
+        "ALTER TABLE users ADD COLUMN specialization  VARCHAR(120)",
+        "ALTER TABLE users ADD COLUMN hospital        VARCHAR(200)",
+        "ALTER TABLE users ADD COLUMN license_number  VARCHAR(80)",
+        "ALTER TABLE users ADD COLUMN address         TEXT",
+        "ALTER TABLE users ADD COLUMN city            VARCHAR(100)",
+        "ALTER TABLE users ADD COLUMN state           VARCHAR(100)",
+        "ALTER TABLE users ADD COLUMN country         VARCHAR(100)",
+        "ALTER TABLE users ADD COLUMN last_login      DATETIME",
     ]
     async with engine.begin() as conn:
         for stmt in _migrations:

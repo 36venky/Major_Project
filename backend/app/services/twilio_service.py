@@ -78,19 +78,20 @@ def e164(phone: str) -> str:
 
 
 def _collect_recipients(
-    guardian_phone: Optional[str],
+    guardian_phone:    Optional[str],
     emergency_contact: Optional[str],
-    phone: Optional[str],
+    phone:             Optional[str],
+    doctor_phone:      Optional[str] = None,
 ) -> list[str]:
     """
     Return a deduplicated ordered list of E.164 numbers to message.
 
-    Priority order: guardian_phone → emergency_contact → phone (patient's own).
+    Priority order: guardian_phone → emergency_contact → phone → doctor_phone.
     Numbers that are empty, None, or duplicates are silently dropped.
     """
     seen: set[str] = set()
     result: list[str] = []
-    for raw in (guardian_phone, emergency_contact, phone):
+    for raw in (guardian_phone, emergency_contact, phone, doctor_phone):
         if not raw:
             continue
         normalised = e164(raw.strip())
@@ -142,6 +143,7 @@ class TwilioWhatsAppService:
         phone:             Optional[str] = None,
         doctor_phone:      Optional[str] = None,
         ambulance_phone:   Optional[str] = None,
+        maps_link:         Optional[str] = None,
         alert_type:        str,
         severity:          str,
         ecg_status:        str,
@@ -177,7 +179,9 @@ class TwilioWhatsAppService:
             )
             return
 
-        recipients = _collect_recipients(guardian_phone, emergency_contact, phone)
+        recipients = _collect_recipients(
+            guardian_phone, emergency_contact, phone, doctor_phone
+        )
         if not recipients:
             logger.debug(
                 "No contact numbers for patient=%s — skipping WhatsApp dispatch.", patient_id
@@ -199,6 +203,7 @@ class TwilioWhatsAppService:
                 timestamp=timestamp,
                 doctor_phone=doctor_phone,
                 ambulance_phone=ambulance_phone,
+                maps_link=maps_link,
                 on_result=on_result,
             )
         )
@@ -219,6 +224,7 @@ class TwilioWhatsAppService:
         timestamp:       datetime,
         doctor_phone:    Optional[str] = None,
         ambulance_phone: Optional[str] = None,
+        maps_link:       Optional[str] = None,
         on_result:       Optional[callable],
     ) -> None:
         """Send to every recipient concurrently and collect results."""
@@ -231,6 +237,7 @@ class TwilioWhatsAppService:
             severity=severity,
             doctor_phone=doctor_phone,
             ambulance_phone=ambulance_phone,
+            maps_link=maps_link,
         )
 
         tasks = [
@@ -262,46 +269,34 @@ class TwilioWhatsAppService:
         severity:        str,
         doctor_phone:    Optional[str] = None,
         ambulance_phone: Optional[str] = None,
+        maps_link:       Optional[str] = None,
     ) -> str:
-        ts_str     = timestamp.strftime("%d %B %Y, %I:%M %p UTC")
+        ts_str     = timestamp.strftime("%d %b %Y, %I:%M %p")
         risk_label = _RISK_LABELS.get(risk_level, risk_level.upper())
+        urgent     = "🔴 CRITICAL" if severity == "critical" else "🟡 WARNING"
 
-        # Severity-specific action line
-        if severity == "critical":
-            action_line = (
-                "⚠️ *IMMEDIATE ACTION REQUIRED* — This is a critical cardiac alert. "
-                "Please ensure the patient receives emergency medical attention without delay."
-            )
-        else:
-            action_line = (
-                "Please review the patient's condition and consult the attending physician "
-                "at the earliest convenience."
-            )
+        lines = [
+            f"*ECG Guardian Alert* — {urgent}",
+            "",
+            f"*Patient:* {patient_name}",
+            f"*Time:* {ts_str}",
+            f"*Condition:* {ecg_status}",
+            f"*Detail:* {alert_message}",
+            f"*Risk:* {risk_label}",
+        ]
 
-        # Emergency contacts block (only shown when numbers are configured)
-        emergency_lines = ""
-        if doctor_phone:
-            emergency_lines += f"\n📞 *Doctor:* {doctor_phone}"
-        if ambulance_phone:
-            emergency_lines += f"\n🚑 *Ambulance:* {ambulance_phone}"
-        if emergency_lines:
-            emergency_lines = "\n" + emergency_lines.strip()
+        if maps_link:
+            lines += ["", f"📍 *Location:* {maps_link}"]
 
-        return (
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🏥 *ECG Guardian — Medical Alert*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"*Patient Name:*  {patient_name}\n"
-            f"*Alert Time:*    {ts_str}\n"
-            f"*Risk Level:*    {risk_label}\n"
-            f"*ECG Status:*    {ecg_status}\n"
-            f"*Alert Detail:*  {alert_message}\n"
-            f"\n{action_line}"
-            f"{emergency_lines}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"_This is an automated notification from ECG Guardian Remote Cardiac "
-            f"Monitoring System. Do not reply to this message._"
-        )
+        if doctor_phone or ambulance_phone:
+            lines.append("")
+            if doctor_phone:
+                lines.append(f"📞 *Doctor:* {doctor_phone}")
+            if ambulance_phone:
+                lines.append(f"🚑 *Ambulance:* {ambulance_phone}")
+
+        lines += ["", "_ECG Guardian – Remote Cardiac Monitoring_"]
+        return "\n".join(lines)
 
     async def _send_with_retry(
         self,
