@@ -1,11 +1,14 @@
 /**
  * api.js – REST API service layer.
  * All communication with FastAPI backend goes through this file.
+ *
+ * Uses getAuthHeaders() from auth.js (no automatic 401 refresh here —
+ * use apiClient.js for endpoints that need silent token refresh).
  */
 
 import { getAuthHeaders } from './auth';
 
-const BASE_URL = 'http://localhost:8000';
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 async function request(method, path, body) {
   const authHdrs = await getAuthHeaders();
@@ -13,13 +16,35 @@ async function request(method, path, body) {
     method,
     headers: { 'Content-Type': 'application/json', ...authHdrs },
   };
-  if (body) opts.body = JSON.stringify(body);
+  if (body !== undefined) opts.body = JSON.stringify(body);
+
   const res = await fetch(`${BASE_URL}${path}`, opts);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const errBody = await res.json();
+      if (typeof errBody.detail === 'string') {
+        detail = errBody.detail;
+      } else if (Array.isArray(errBody.detail)) {
+        detail = errBody.detail
+          .map(e => `${e.loc?.slice(1).join(' → ') ?? 'field'}: ${e.msg}`)
+          .join('; ');
+      } else if (errBody.message) {
+        detail = errBody.message;
+      }
+    } catch { /* keep generic HTTP status string */ }
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
+  }
+
+  if (res.status === 204) return null;
   return res.json();
 }
 
 /* ── Patient ────────────────────────────────────────────── */
+export const listPatients  = ()         => request('GET', '/patients');
 export const getPatient    = (id)       => request('GET', `/patients/${id}`);
 export const updatePatient = (id, data) => request('PUT', `/patients/${id}`, data);
 
@@ -29,23 +54,25 @@ export const saveLocation  = (id, data) => request('PUT',    `/patients/${id}/lo
 export const clearLocation = (id)       => request('DELETE', `/patients/${id}/location`);
 
 /* ── Alerts ─────────────────────────────────────────────── */
-export const getAlerts          = (patientId) => request('GET',  `/alerts?patient_id=${patientId}`);
+export const getAlerts          = (patientId) => request('GET',  `/alerts?patient_id=${encodeURIComponent(patientId)}`);
 export const sendWhatsAppReport = (patientId) => request('POST', '/alerts/send-report', { patient_id: patientId });
 
 /* ── Weekly Health ──────────────────────────────────────── */
-export const getWeeklyHealth  = ()     => request('GET',  '/weekly-health');
-export const postWeeklyHealth = (data) => request('POST', '/weekly-health', data);
+// patient_id is required — the backend endpoint now requires it as a query param
+export const getWeeklyHealth  = (patientId) => request('GET',  `/weekly-health?patient_id=${encodeURIComponent(patientId)}`);
+export const postWeeklyHealth = (data)      => request('POST', '/weekly-health', data);
+
+/* ── ECG History (correct path: /ecg/history, requires patient_id) ── */
+export const getEcgHistory = (patientId, limit = 20) =>
+  request('GET', `/ecg/history?patient_id=${encodeURIComponent(patientId)}&limit=${limit}`);
 
 /* ── Reports ────────────────────────────────────────────── */
-export const getReports = () => request('GET', '/reports');
+export const getReportSessions = (patientId, limit = 20) => getEcgHistory(patientId, limit);
 
-/* ── History ────────────────────────────────────────────── */
-export const getHistory = () => request('GET', '/history');
-
-/* ── Device ─────────────────────────────────────────────── */
+/* ── Device status (correct path: /device) ─────────────── */
 export const getDevice = () => request('GET', '/device');
 
-/* ── Mock History Sessions (used when backend is down) ─── */
+/* ── Mock History Sessions (fallback when backend is down) ─ */
 export const MOCK_HISTORY = [
   {
     id: 'S001',

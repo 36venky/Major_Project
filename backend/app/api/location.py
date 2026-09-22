@@ -133,11 +133,5 @@ async def delete_location(
         "location_address": None,
         "maps_link":        None,
     })
-    # crud.update_patient skips None values — force-clear by direct setattr
-    patient = await crud.get_patient(db, patient_id)
-    if patient:
-        patient.location         = None
-        patient.location_address = None
-        patient.maps_link        = None
 
     return APIResponse(message=f"Location cleared for patient {patient_id}.")

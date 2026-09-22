@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
 
     Startup:
       1. Initialise database (create tables)
-      2. Seed default patient if missing
+      2. Seed default admin user (first run only)
       3. Start ECGService (serial + processing + WebSocket broadcast)
       4. Start APScheduler background jobs
 
@@ -70,9 +70,8 @@ async def lifespan(app: FastAPI):
     # 1. Database
     await init_db()
 
-    # 2. Seed default admin user and demo patient
+    # 2. Seed default admin user
     await _seed_default_admin()
-    await _seed_default_patient()
 
     # 3. ECG service
     await ecg_service.start()
@@ -127,29 +126,7 @@ async def _seed_default_admin() -> None:
             )
 
 
-async def _seed_default_patient() -> None:
-    """Insert the default demo patient if the database is empty."""
-    from app.database.database import AsyncSessionLocal
-    from app.database import crud
 
-    async with AsyncSessionLocal() as db:
-        existing = await crud.get_patient(db, "P-001")
-        if not existing:
-            await crud.create_patient(db, {
-                "patient_id":      "P-001",
-                "name":            "Arjun Sharma",
-                "age":             45,
-                "gender":          "Male",
-                "blood_group":     "B+",
-                "height":          "172 cm",
-                "weight":          "74 kg",
-                "guardian_name":   "Priya Sharma",
-                "guardian_phone":  "+91 98765 43210",
-                "phone":           "+91 98765 43210",
-                "emergency_contact": "+91 98765 43210",
-            })
-            await db.commit()
-            logger.info("Default patient P-001 seeded.")
 
 
 # ── Application factory ────────────────────────────────────
@@ -218,12 +195,39 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["System"], summary="Health check")
     async def health_check():
-        """Returns 200 OK when the server is running."""
+        """
+        Returns 200 OK when the server is running.
+
+        Performs a lightweight database connectivity probe (SELECT 1) so
+        the caller can confirm the configured backend is reachable.
+        The response includes the database type ("sqlite" or "postgresql")
+        but never exposes credentials or the connection string.
+        """
+        from sqlalchemy import text
+        from app.database.database import AsyncSessionLocal
+
+        db_type   = settings.database_type   # "sqlite" | "postgresql"
+        db_status = "unreachable"
+        db_detail: str | None = None
+
+        try:
+            async with AsyncSessionLocal() as probe:
+                await probe.execute(text("SELECT 1"))
+            db_status = "connected"
+        except Exception as exc:
+            db_status = "error"
+            db_detail = type(exc).__name__   # expose class name only, never message (may contain creds)
+            logger.error("Health-check DB probe failed: %s", exc)
+
         return {
-            "status": "ok",
-            "version": settings.APP_VERSION,
-            "monitoring": ecg_service.is_monitoring,
-            "connected":  ecg_service.is_connected,
+            "status":              "ok" if db_status == "connected" else "degraded",
+            "version":             settings.APP_VERSION,
+            "database":            db_type,
+            "db_status":           db_status,
+            **({"db_error": db_detail} if db_detail else {}),
+            "monitoring":          ecg_service.is_monitoring,
+            "connected":           ecg_service.is_connected,
+            "hardware_connected":  ecg_service.hardware_connected,
         }
 
     return app

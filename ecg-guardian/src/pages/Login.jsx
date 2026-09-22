@@ -1,11 +1,6 @@
 /**
- * Login.jsx – Clean sign-in page for ECG Guardian.
- *
- * - Email + password login (backend also accepts username)
- * - Password visibility toggle
- * - Clear validation + server error display
- * - Link to /register for new users
- * - Redirects to / on success
+ * Login.jsx – Email + password sign-in for ECG Guardian.
+ * Clean, single-mode login — no OTP tab clutter.
  */
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -19,26 +14,24 @@ export default function Login() {
   const navigate     = useNavigate();
   const { dispatch } = useApp();
 
-  const [identifier, setIdentifier] = useState('');   // email or username
-  const [password,   setPassword]   = useState('');
-  const [showPw,     setShowPw]     = useState(false);
-  const [loading,    setLoading]    = useState(false);
-  const [errors,     setErrors]     = useState({});
-  const [serverErr,  setServerErr]  = useState('');
+  const [email,    setEmail]    = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw,   setShowPw]   = useState(false);
+  const [loading,  setLoading]  = useState(false);
+  const [errors,   setErrors]   = useState({});
+  const [serverErr,setServerErr]= useState('');
 
-  // ── Validation ────────────────────────────────────────
   function validate() {
     const errs = {};
-    if (!identifier.trim())
-      errs.identifier = 'Please enter your email address.';
-    else if (!EMAIL_RE.test(identifier.trim()) && identifier.trim().length < 3)
-      errs.identifier = 'Enter a valid email address or username.';
+    if (!email.trim())
+      errs.email = 'Please enter your email address.';
+    else if (!EMAIL_RE.test(email.trim()))
+      errs.email = 'Enter a valid email address.';
     if (!password)
       errs.password = 'Please enter your password.';
     return errs;
   }
 
-  // ── Submit ────────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault();
     const errs = validate();
@@ -49,18 +42,16 @@ export default function Login() {
     setServerErr('');
 
     try {
-      const { user } = await loginWithCredentials(identifier.trim(), password);
+      const { user } = await loginWithCredentials(email.trim(), password);
       dispatch({ type: 'SET_AUTH_USER', payload: user });
       navigate('/', { replace: true });
-    } catch (_err) {
-      // Generic message — don't reveal whether email exists
+    } catch {
       setServerErr('Invalid email or password. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Render ────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50
                     flex items-center justify-center p-4">
@@ -79,7 +70,7 @@ export default function Login() {
         {/* Card */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
 
-          {/* Card header */}
+          {/* Header */}
           <div className="px-8 pt-7 pb-5 border-b border-slate-100">
             <h2 className="text-lg font-semibold text-slate-800">Welcome back</h2>
             <p className="text-sm text-slate-400 mt-0.5">Sign in to access the monitoring dashboard</p>
@@ -88,54 +79,43 @@ export default function Login() {
           {/* Form */}
           <form onSubmit={handleLogin} noValidate className="px-8 py-6 space-y-5">
 
-            {/* Email / username */}
+            {/* Email */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 Email Address
               </label>
               <input
-                type="text"
-                value={identifier}
-                onChange={e => {
-                  setIdentifier(e.target.value);
-                  if (errors.identifier) setErrors(v => ({ ...v, identifier: '' }));
-                }}
+                type="email"
+                value={email}
+                onChange={e => { setEmail(e.target.value); setErrors(v => ({ ...v, email: '' })); }}
                 placeholder="you@example.com"
                 autoFocus
                 autoComplete="email"
                 className={`w-full text-sm px-3 py-2.5 border rounded-xl outline-none transition-all
                   focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400
-                  ${errors.identifier ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'}`}
+                  ${errors.email ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'}`}
               />
-              {errors.identifier && (
+              {errors.email && (
                 <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />{errors.identifier}
+                  <AlertCircle className="w-3 h-3" />{errors.email}
                 </p>
               )}
             </div>
 
             {/* Password */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-sm font-medium text-slate-700">Password</label>
-                {/* Placeholder — no backend reset flow yet */}
-                <span className="text-xs text-slate-400 cursor-default select-none"
-                  title="Password reset is not available in this version">
-                  Forgot password?
-                </span>
-              </div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                Password
+              </label>
               <div className="relative">
                 <input
                   type={showPw ? 'text' : 'password'}
                   value={password}
-                  onChange={e => {
-                    setPassword(e.target.value);
-                    if (errors.password) setErrors(v => ({ ...v, password: '' }));
-                  }}
+                  onChange={e => { setPassword(e.target.value); setErrors(v => ({ ...v, password: '' })); }}
                   placeholder="••••••••"
                   autoComplete="current-password"
-                  className={`w-full text-sm px-3 py-2.5 pr-10 border rounded-xl outline-none
-                    transition-all focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400
+                  className={`w-full text-sm px-3 py-2.5 pr-10 border rounded-xl outline-none transition-all
+                    focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400
                     ${errors.password ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'}`}
                 />
                 <button
@@ -169,15 +149,16 @@ export default function Login() {
               disabled={loading}
               className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-semibold
                          bg-blue-600 text-white rounded-xl hover:bg-blue-700 active:scale-[0.98]
-                         transition-all disabled:opacity-60 shadow-sm shadow-blue-200 mt-1"
+                         transition-all disabled:opacity-60 shadow-sm shadow-blue-200"
             >
               {loading
                 ? <><Loader2 className="w-4 h-4 animate-spin" />Signing in…</>
-                : 'Sign In'}
+                : 'Sign In'
+              }
             </button>
           </form>
 
-          {/* Card footer */}
+          {/* Footer */}
           <div className="px-8 pb-7">
             <p className="text-center text-sm text-slate-500">
               Don&apos;t have an account?{' '}

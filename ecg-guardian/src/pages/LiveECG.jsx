@@ -24,10 +24,15 @@ export default function LiveECG() {
   const [sendMsg, setSendMsg]   = useState('');
 
   const handleSendReport = async () => {
+    const patientId = state.patient?.id;
+    if (!patientId) {
+      setSendStatus('error');
+      setSendMsg('No patient selected. Register a patient first.');
+      return;
+    }
     setSending(true);
     setSendStatus(null);
     try {
-      const patientId = state.patient.id;
       const res = await sendWhatsAppReport(patientId);
       setSendStatus('ok');
       setSendMsg(res.message ?? 'Report sent.');

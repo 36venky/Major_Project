@@ -23,8 +23,6 @@ from app.services.ecg_service import ecg_service
 
 router = APIRouter(prefix="/bpm", tags=["Heart Rate"])
 
-_DEFAULT_PATIENT = "P-001"
-
 
 @router.get("/live", summary="Get current live heart rate")
 async def get_live_bpm(
@@ -56,7 +54,7 @@ async def get_live_bpm(
 
 @router.get("/history", response_model=List[HeartRateResponse], summary="BPM history")
 async def get_bpm_history(
-    patient_id: str = Query(default=_DEFAULT_PATIENT),
+    patient_id: str = Query(..., description="Patient ID (required)"),
     limit:      int = Query(default=100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     _: TokenData = Depends(get_current_user),

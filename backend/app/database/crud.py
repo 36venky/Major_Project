@@ -82,14 +82,24 @@ async def get_all_patients(db: AsyncSession) -> Sequence[Patient]:
 
 
 async def update_patient(db: AsyncSession, patient_id: str, data: dict) -> Optional[Patient]:
-    """Update non-null fields of a patient record."""
+    """
+    Update a patient record with only the fields present in *data*.
+
+    Fields absent from *data* are never touched.
+    Fields explicitly set to None in *data* ARE written as NULL —
+    this is intentional and required for clearing optional fields
+    (e.g. clearing location via DELETE /patients/{id}/location).
+    """
     patient = await get_patient(db, patient_id)
     if not patient:
         return None
     for key, value in data.items():
-        if value is not None:
-            setattr(patient, key, value)
+        if hasattr(patient, key):
+            setattr(patient, key, value)   # None is written as NULL — intentional
+        else:
+            logger.warning("update_patient: unknown column '%s' — skipped", key)
     await db.flush()
+    logger.info("Updated patient %s — fields: %s", patient_id, list(data.keys()))
     return patient
 
 

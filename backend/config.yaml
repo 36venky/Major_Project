@@ -45,6 +45,7 @@ alerts:
   signal_quality_warn: 50     # %
   signal_quality_poor: 30     # %
   max_active_alerts: 50
+  whatsapp_cooldown_seconds: 300  # 5 minutes between repeated WhatsApp alerts per patient/type
 
 # Authentication / Security
 security:

@@ -15,12 +15,22 @@ import {
   Heart, User, Users, Stethoscope, MapPin, CheckCircle,
   Eye, EyeOff, Loader2, AlertCircle, ChevronLeft,
   ChevronRight, Phone, Navigation, Search,
-  Check, Edit2, ExternalLink,
+  Check, Edit2, ExternalLink, ArrowRight,
 } from 'lucide-react';
-import { registerUser, loginWithCredentials, getAuthHeaders } from '../services/auth';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import { registerUser, loginWithCredentials } from '../services/auth';
+import { apiPost } from '../services/apiClient';
 import { useApp } from '../context/AppContext';
 
-const API_BASE = 'http://localhost:8000';
+// Fix Leaflet default marker icon (broken by Vite's asset pipeline)
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: new URL('leaflet/dist/images/marker-icon-2x.png', import.meta.url).href,
+  iconUrl:       new URL('leaflet/dist/images/marker-icon.png',    import.meta.url).href,
+  shadowUrl:     new URL('leaflet/dist/images/marker-shadow.png',  import.meta.url).href,
+});
 
 // ── Constants ─────────────────────────────────────────────
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
@@ -237,7 +247,7 @@ function StepAccount({ data, onChange, errors }) {
     <div className="space-y-5">
       <div>
         <Label required>Full Name</Label>
-        <Input placeholder="e.g. Dr. Venkatesh Raju" value={data.fullName}
+        <Input placeholder="e.g. Venkatesh Raju" value={data.fullName}
           onChange={e => onChange('fullName', e.target.value)} error={errors.fullName} />
         <FieldError msg={errors.fullName} />
       </div>
@@ -943,15 +953,15 @@ export default function Register() {
     try {
       await registerUser({
         username,
-        email:           data.email,
-        password:        data.password,
+        email:            data.email,
+        password:         data.password,
         confirm_password: data.confirmPassword,
-        full_name:       data.fullName,
-        role:            data.role,
-        phone:           data.phone || null,
-        specialization:  data.specialization || null,
-        hospital:        data.hospital || null,
-        license_number:  data.licenseNumber || null,
+        full_name:        data.fullName,
+        role:             data.role,
+        phone:            data.phone         || null,
+        specialization:   data.specialization || null,
+        hospital:         data.hospital       || null,
+        license_number:   data.licenseNumber  || null,
       });
     } catch (err) {
       setServerErr(err.message);
@@ -969,65 +979,59 @@ export default function Register() {
       return;
     }
 
-    // 3. Create patient record
-    const headers = await getAuthHeaders();
+    // 3. Create patient record — send every field the wizard collects
     const age      = ageFromDob(data.dob);
+    // Merge cardiac condition + cardiac history into diseases field
     const diseases = [data.cardiacCondition, data.cardiacHistory].filter(Boolean).join('; ') || null;
+    // Merge patient notes + medical notes into the notes field
+    const notes    = [data.patientNotes, data.medNotes].filter(Boolean).join('\n\n') || null;
 
     try {
       const patientPayload = {
+        // Core demographics
         name:              data.patientName,
-        age:               age,
+        age,
+        dob:               data.dob          || null,
         gender:            data.gender,
         blood_group:       data.bloodGroup,
-        phone:             data.patientPhone || null,
-        height:            data.height || null,
-        weight:            data.weight || null,
-        guardian_name:     data.guardianName || null,
-        guardian_phone:    data.guardianPhone || null,
-        emergency_contact: data.guardianPhone || null,
-        doctor_phone:      data.doctorPhone || null,
+        phone:             data.patientPhone  || null,
+        height:            data.height        || null,
+        weight:            data.weight        || null,
+        // Guardian
+        guardian_name:     data.guardianName     || null,
+        guardian_phone:    data.guardianPhone    || null,
+        guardian_relation: data.guardianRelation || null,
+        emergency_contact: data.guardianPhone    || null,
+        // Doctor
+        doctor_name:       data.doctorName     || null,
+        doctor_hospital:   data.doctorHospital || null,
+        doctor_phone:      data.doctorPhone    || null,
+        // Ambulance
+        ambulance_name:    data.ambulanceName  || null,
         ambulance_phone:   data.ambulancePhone || null,
-        diseases:          diseases,
+        // Medical
+        diseases,
         medications:       data.medications || null,
-        allergies:         data.allergies || null,
+        allergies:         data.allergies   || null,
+        notes,
+        // Location
         address:           data.locationAddress || null,
         location:          data.latitude && data.longitude
                              ? `${data.latitude},${data.longitude}` : null,
         location_address:  data.locationAddress || null,
-        maps_link:         data.mapsLink || null,
+        maps_link:         data.mapsLink        || null,
         registration_date: new Date().toISOString(),
       };
 
-      const res = await fetch(`${API_BASE}/patients`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
-        body:    JSON.stringify(patientPayload),
-      });
 
-      if (res.ok) {
-        const newPatient = await res.json();
-        dispatch({ type: 'ADD_PATIENT_TO_LIST', payload: newPatient });
-        dispatch({
-          type: 'UPDATE_PATIENT',
-          payload: {
-            id:               newPatient.patient_id,
-            name:             newPatient.name,
-            age:              newPatient.age,
-            gender:           newPatient.gender,
-            bloodGroup:       newPatient.blood_group,
-            height:           newPatient.height   || '—',
-            weight:           newPatient.weight   || '—',
-            guardianName:     newPatient.guardian_name  || data.guardianName,
-            emergencyContact: newPatient.guardian_phone || data.guardianPhone,
-            doctorPhone:      newPatient.doctor_phone,
-            ambulancePhone:   newPatient.ambulance_phone,
-            location:         newPatient.location,
-            locationAddress:  newPatient.location_address,
-            mapsLink:         newPatient.maps_link,
-          },
-        });
-      }
+      // Use apiPost so the token is automatically attached
+      const newPatient = await apiPost('/patients', patientPayload);
+
+      // Map backend response to frontend camelCase shape and push to context
+      const { patientFromBackend } = await import('../context/AppContext');
+      const mapped = patientFromBackend(newPatient);
+      dispatch({ type: 'ADD_PATIENT_TO_LIST', payload: mapped });
+      dispatch({ type: 'SET_PATIENT',         payload: mapped });
     } catch {
       // Patient creation failure is non-fatal — user can add from Patients page
     }

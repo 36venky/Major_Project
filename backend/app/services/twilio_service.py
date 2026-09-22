@@ -113,7 +113,7 @@ class TwilioWhatsAppService:
         self._account_sid: Optional[str] = os.getenv("TWILIO_ACCOUNT_SID")
         self._auth_token:  Optional[str] = os.getenv("TWILIO_AUTH_TOKEN")
         self._from_number: Optional[str] = os.getenv("TWILIO_WHATSAPP_FROM")
-        self._cooldown_s:  int           = int(os.getenv("WHATSAPP_COOLDOWN_SECONDS", "300"))
+        self._cooldown_s:  int           = int(os.getenv("WHATSAPP_COOLDOWN_SECONDS", "300"))  # 5 minutes
 
         self._enabled: bool = bool(self._account_sid and self._auth_token and self._from_number)
 

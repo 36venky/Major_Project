@@ -1,52 +1,57 @@
 /**
  * AppContext – Global application state.
  *
- * authUser now stores the full profile from /auth/profile:
- *   { username, role, full_name, email, phone, specialization, hospital, city, country }
+ * Auth persistence
+ * ────────────────
+ * Tokens + user profile live in localStorage so the user stays logged in
+ * across page refreshes and browser restarts (handled by auth.js / App.jsx).
  *
- * LOGOUT action clears authUser and resets patient state.
+ * Patient persistence — REMOVED
+ * ──────────────────────────────
+ * The active patient is NOT stored in localStorage.  It is always fetched
+ * fresh from GET /patients after login.  This prevents stale patient IDs
+ * (e.g. from a previous database) from breaking the UI.
+ *
+ * On every login / page load:
+ *   - listPatients() is called once authUser is set
+ *   - The first patient in the list becomes the active patient
+ *   - If no patients exist yet, patient is null
+ *
+ * LOGOUT resets all state including authUser and patient.
  */
-import { createContext, useContext, useReducer, useCallback, useRef } from 'react';
+import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react';
 import { getUserInfo } from '../services/auth';
+import { listPatients } from '../services/api';
 
+// Hydrate auth user from localStorage on page load (tokens are in localStorage)
 const _savedUser = getUserInfo();
 
 const initialState = {
-  authUser: _savedUser || null,  // { username, role, full_name } or null
-  patient: {
-    id:               'P-001',
-    name:             'Arjun Sharma',
-    age:              45,
-    gender:           'Male',
-    bloodGroup:       'B+',
-    height:           '172 cm',
-    weight:           '74 kg',
-    guardianName:     'Priya Sharma',
-    emergencyContact: '+91 98765 43210',
-    location:         null,   // "lat,lng" string or null
-    locationAddress:  null,
-    mapsLink:         null,
-  },
-  patientList: [],   // all registered patients (for selector)
+  authUser:       _savedUser || null,
+  patient:        null,          // always fetched from backend — never persisted
+  patientList:    [],
+  patientLoading: false,
+  patientError:   null,
   device: {
-    connected:         true,
-    port:              'WiFi (ESP32)',
-    samplingRate:      '250 Hz',
-    signalQuality:     92,
-    monitoringDuration:'00:00:00',
-    status:            'Active',
+    connected:          false,
+    hardwareConnected:  false,   // true only when a real ESP32 is on /ws/device
+    port:               'WiFi (ESP32)',
+    samplingRate:       '250 Hz',
+    signalQuality:      0,
+    monitoringDuration: '00:00:00',
+    status:             'Connecting…',
   },
   heartRate: {
-    current:     72,
-    status:      'Normal',
+    current:     0,
+    status:      'Unknown',
     normalRange: '60–100 BPM',
     trend:       'stable',
     history:     [],
   },
   weeklyHealth: {
-    bloodPressure: '118/76 mmHg',
-    bloodSugar:    '98 mg/dL',
-    lastUpdated:   new Date().toISOString(),
+    bloodPressure: null,
+    bloodSugar:    null,
+    lastUpdated:   null,
   },
   aiAnalysis: {
     rhythm:         null,
@@ -56,22 +61,13 @@ const initialState = {
     signalQuality:  'Good',
     recentEvents:   [],
   },
-  riskPrediction: null,  // { risk_percentage, risk_level, timestamp, majority_label }
-  alerts: [
-    {
-      id: 'a1', type: 'info', severity: 'low',
-      title: 'Monitoring Started',
-      description: 'ECG monitoring session has begun.',
-      time: new Date().toISOString(), status: 'active',
-    },
-  ],
-  timeline: [
-    { id: 't1', event: 'Monitoring Started', time: new Date().toISOString(), icon: 'play', color: 'green' },
-  ],
-  ecgData:       [],
-  isMonitoring:  true,
-  isPaused:      false,
-  notifications: [],
+  riskPrediction: null,
+  alerts:         [],
+  timeline:       [],
+  ecgData:        [],
+  isMonitoring:   false,
+  isPaused:       false,
+  notifications:  [],
 };
 
 function appReducer(state, action) {
@@ -90,9 +86,9 @@ function appReducer(state, action) {
         heartRate: {
           ...state.heartRate,
           current: next,
-          trend: next > prev + 3 ? 'up' : next < prev - 3 ? 'down' : 'stable',
+          trend:   next > prev + 3 ? 'up' : next < prev - 3 ? 'down' : 'stable',
           history: [...state.heartRate.history.slice(-59), next],
-          status: next <= 60 ? 'Bradycardia' : next >= 100 ? 'Tachycardia' : 'Normal',
+          status:  next <= 60 ? 'Bradycardia' : next >= 100 ? 'Tachycardia' : 'Normal',
         },
       };
     }
@@ -129,13 +125,21 @@ function appReducer(state, action) {
     case 'UPDATE_PATIENT':
       return { ...state, patient: { ...state.patient, ...action.payload } };
 
+    case 'SET_PATIENT':
+      return { ...state, patient: action.payload, patientError: null };
+
+    case 'SET_PATIENT_LOADING':
+      return { ...state, patientLoading: action.payload };
+
+    case 'SET_PATIENT_ERROR':
+      return { ...state, patientError: action.payload, patientLoading: false };
+
     case 'ADD_PATIENT_TO_LIST': {
-      // Add new patient to patientList, avoid duplicates
-      const exists = state.patientList.some(p => p.patient_id === action.payload.patient_id);
+      const exists = state.patientList.some(p => p.id === action.payload.id);
       return {
         ...state,
         patientList: exists
-          ? state.patientList.map(p => p.patient_id === action.payload.patient_id ? action.payload : p)
+          ? state.patientList.map(p => p.id === action.payload.id ? action.payload : p)
           : [action.payload, ...state.patientList],
       };
     }
@@ -158,9 +162,11 @@ function appReducer(state, action) {
     case 'LOGOUT':
       return {
         ...initialState,
-        authUser: null,
-        // keep device / monitoring defaults, only clear user-specific data
-        patientList: [],
+        authUser:       null,
+        patient:        null,
+        patientList:    [],
+        patientLoading: false,
+        patientError:   null,
       };
 
     default:
@@ -170,17 +176,80 @@ function appReducer(state, action) {
 
 const AppContext = createContext(null);
 
+// ── Backend → camelCase mapper (single source of truth) ───
+export function patientFromBackend(b) {
+  return {
+    id:               b.patient_id,
+    name:             b.name,
+    age:              b.age,
+    dob:              b.dob              ?? null,
+    gender:           b.gender,
+    bloodGroup:       b.blood_group,
+    height:           b.height          ?? '',
+    weight:           b.weight          ?? '',
+    // Guardian
+    guardianName:     b.guardian_name     ?? '',
+    guardianPhone:    b.guardian_phone    ?? '',
+    guardianRelation: b.guardian_relation ?? '',
+    // Patient contact
+    phone:            b.phone             ?? '',
+    emergencyContact: b.emergency_contact ?? '',
+    // Doctor
+    doctorName:       b.doctor_name       ?? '',
+    doctorHospital:   b.doctor_hospital   ?? '',
+    doctorPhone:      b.doctor_phone      ?? '',
+    // Ambulance
+    ambulanceName:    b.ambulance_name    ?? '',
+    ambulancePhone:   b.ambulance_phone   ?? '',
+    // Medical
+    diseases:         b.diseases    ?? '',
+    medications:      b.medications ?? '',
+    allergies:        b.allergies   ?? '',
+    notes:            b.notes       ?? '',
+    // Address / location
+    address:          b.address          ?? '',
+    location:         b.location         ?? null,
+    locationAddress:  b.location_address ?? null,
+    mapsLink:         b.maps_link        ?? null,
+    createdAt:        b.created_at,
+  };
+}
+
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
   const wsRef = useRef(null);
 
+  /**
+   * refreshPatients — fetches GET /patients and sets the first patient as active.
+   * Called once when authUser is set (login or page refresh with valid token).
+   */
+  const refreshPatients = useCallback(async () => {
+    if (!state.authUser) return;
+    dispatch({ type: 'SET_PATIENT_LOADING', payload: true });
+    try {
+      const patients = await listPatients();
+      const mapped   = patients.map(patientFromBackend);
+      dispatch({ type: 'SET_PATIENT_LIST', payload: mapped });
+      // Always use the first patient — no localStorage preference
+      dispatch({ type: 'SET_PATIENT', payload: mapped.length > 0 ? mapped[0] : null });
+      dispatch({ type: 'SET_PATIENT_LOADING', payload: false });
+    } catch (err) {
+      dispatch({ type: 'SET_PATIENT_ERROR', payload: err.message });
+    }
+  }, [state.authUser]);
+
+  // Fetch patients once when auth state becomes available
+  useEffect(() => {
+    if (state.authUser) {
+      refreshPatients();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.authUser]);
+
   const addAlert = useCallback((alert) => {
     const id = `a-${Date.now()}`;
-    dispatch({ type: 'ADD_ALERT', payload: { id, time: new Date().toISOString(), status: 'active', ...alert } });
-    dispatch({
-      type: 'ADD_NOTIFICATION',
-      payload: { id, title: alert.title, description: alert.description, severity: alert.severity, time: new Date().toISOString() },
-    });
+    dispatch({ type: 'ADD_ALERT',        payload: { id, time: new Date().toISOString(), status: 'active', ...alert } });
+    dispatch({ type: 'ADD_NOTIFICATION', payload: { id, title: alert.title, description: alert.description, severity: alert.severity, time: new Date().toISOString() } });
   }, []);
 
   const addTimelineEvent = useCallback((event) => {
@@ -191,7 +260,7 @@ export function AppProvider({ children }) {
   }, []);
 
   return (
-    <AppContext.Provider value={{ state, dispatch, wsRef, addAlert, addTimelineEvent }}>
+    <AppContext.Provider value={{ state, dispatch, wsRef, addAlert, addTimelineEvent, refreshPatients }}>
       {children}
     </AppContext.Provider>
   );

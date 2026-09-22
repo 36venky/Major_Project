@@ -87,6 +87,15 @@ class Patient(Base):
     # Emergency services (Feature 4 – formal alerts)
     doctor_phone: Mapped[str | None]     = mapped_column(String(30), nullable=True)
     ambulance_phone: Mapped[str | None]  = mapped_column(String(30), nullable=True)
+    # Extended contact details (collected during registration wizard)
+    guardian_relation: Mapped[str | None] = mapped_column(String(60), nullable=True)   # e.g. "Father"
+    doctor_name:       Mapped[str | None] = mapped_column(String(120), nullable=True)
+    doctor_hospital:   Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ambulance_name:    Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Notes (patient notes + medical notes combined at registration)
+    notes:             Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Date of birth (raw ISO string e.g. "1985-04-12"; age is computed from this)
+    dob:               Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Location (Feature 7 – patient location management)
     location: Mapped[str | None]         = mapped_column(Text, nullable=True)  # "lat,lng" e.g. "12.9716,77.5946"
     location_address: Mapped[str | None] = mapped_column(Text, nullable=True)  # human-readable address

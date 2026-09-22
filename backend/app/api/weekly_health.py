@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/weekly-health", tags=["Weekly Health"])
 
 @router.get("", response_model=WeeklyHealthResponse, summary="Get latest health record")
 async def get_weekly_health(
-    patient_id: str  = "P-001",
+    patient_id: str  = Query(..., description="Patient ID (required)"),
     db: AsyncSession = Depends(get_db),
     _: TokenData     = Depends(get_current_user),
 ):

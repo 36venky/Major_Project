@@ -65,13 +65,28 @@ async def update_patient(
     """
     Update mutable fields of a patient record.
 
+    Only fields that were *explicitly sent* in the request body are written
+    to the database.  ``exclude_unset=True`` ensures fields the client omitted
+    are never touched, while fields the client sent as ``null`` or ``""`` are
+    written as-is (clearing the column).
+
     Raises:
         NotFoundError: if patient does not exist.
     """
-    await get_patient(db, patient_id)   # raises if missing
-    updated = await crud.update_patient(db, patient_id, data.model_dump(exclude_none=True))
+    await get_patient(db, patient_id)   # raises 404 if missing
+
+    # exclude_unset=True  →  only fields the client actually sent
+    # exclude_none=False  →  allow intentional null/empty writes
+    payload = data.model_dump(exclude_unset=True)
+
+    if not payload:
+        # Nothing was sent — return current record unchanged
+        return await get_patient(db, patient_id)
+
+    updated = await crud.update_patient(db, patient_id, payload)
     await db.commit()
-    logger.info("Patient updated: %s", patient_id)
+    logger.info("Patient %s updated — %d field(s): %s",
+                patient_id, len(payload), list(payload.keys()))
     return updated
 
 

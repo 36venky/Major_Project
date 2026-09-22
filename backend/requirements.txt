@@ -7,7 +7,8 @@ uvicorn[standard]==0.32.1
 
 # Database
 sqlalchemy==2.0.36
-aiosqlite==0.20.0
+aiosqlite==0.20.0           # SQLite async driver (local dev, default)
+asyncpg==0.30.0             # PostgreSQL async driver (Neon cloud)
 
 # Validation
 pydantic==2.10.3
@@ -19,7 +20,7 @@ scipy==1.14.1
 
 # Authentication
 python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
+bcrypt==4.2.1
 python-multipart==0.0.20
 
 # Configuration
@@ -32,16 +33,18 @@ reportlab==4.2.5
 # Background tasks
 apscheduler==3.10.4
 
-# HTTP client (for internal health checks)
+# HTTP client (for internal health checks / testing)
 httpx==0.28.1
+
+# ML risk prediction (Model/predict.py — loaded at runtime by prediction_service.py)
+xgboost==2.1.3
+scikit-learn==1.6.1
+joblib==1.4.2
+pandas==2.2.3
 
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.25.0
-httpx==0.28.1
-
-# Utilities
-python-dateutil==2.9.0
 
 # Twilio WhatsApp alerts (Feature 4)
 twilio==9.4.5

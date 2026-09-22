@@ -21,7 +21,7 @@ import { useApp } from '../context/AppContext';
 import { formatDateTime } from '../utils/helpers';
 import { getAuthHeaders } from '../services/auth';
 
-const BASE_URL = 'http://localhost:8000';
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 // ── Helpers ───────────────────────────────────────────────
 
@@ -111,7 +111,7 @@ function BPMSparkline({ history }) {
 
 export default function Reports() {
   const { state } = useApp();
-  const p  = state.patient;
+  const p  = state.patient;    // may be null — guard below before using p.id
   const wh = state.weeklyHealth;
   const hr = state.heartRate;
 
@@ -124,11 +124,12 @@ export default function Reports() {
   // ── Fetch session list on mount ───────────────────────
   useEffect(() => {
     const load = async () => {
+      if (!p?.id) { setLoadingSessions(false); return; }
       setLoadingSessions(true);
       try {
         const headers = await getAuthHeaders();
         const res = await fetch(
-          `${BASE_URL}/ecg/history?patient_id=${p.id || 'P-001'}&limit=20`,
+          `${BASE_URL}/ecg/history?patient_id=${p?.id ?? ''}&limit=20`,
           { headers },
         );
         if (!res.ok) throw new Error('Failed to load sessions');
@@ -142,7 +143,7 @@ export default function Reports() {
       }
     };
     load();
-  }, [p.id]);
+  }, [p?.id]);
 
   // ── Real PDF download ─────────────────────────────────
   const handleDownloadPDF = useCallback(async () => {
@@ -267,15 +268,15 @@ export default function Reports() {
         {/* Patient + Monitoring summary */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card title="Patient Information">
-            <StatRow label="Name"              value={p.name} />
-            <StatRow label="Patient ID"        value={p.id} />
-            <StatRow label="Age"               value={`${p.age} years`} />
-            <StatRow label="Gender"            value={p.gender} />
-            <StatRow label="Blood Group"       value={p.bloodGroup} />
-            <StatRow label="Height"            value={p.height} />
-            <StatRow label="Weight"            value={p.weight} />
-            <StatRow label="Guardian"          value={p.guardianName} />
-            <StatRow label="Emergency Contact" value={p.emergencyContact} />
+            <StatRow label="Name"              value={p?.name             || '—'} />
+            <StatRow label="Patient ID"        value={p?.id               || '—'} />
+            <StatRow label="Age"               value={p?.age ? `${p.age} years` : '—'} />
+            <StatRow label="Gender"            value={p?.gender           || '—'} />
+            <StatRow label="Blood Group"       value={p?.bloodGroup       || '—'} />
+            <StatRow label="Height"            value={p?.height           || '—'} />
+            <StatRow label="Weight"            value={p?.weight           || '—'} />
+            <StatRow label="Guardian"          value={p?.guardianName     || '—'} />
+            <StatRow label="Emergency Contact" value={p?.emergencyContact || '—'} />
           </Card>
 
           <Card title="Monitoring Summary">

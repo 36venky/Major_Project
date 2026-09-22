@@ -43,7 +43,7 @@ class ECGService:
     """Singleton service that manages the ECG monitoring pipeline."""
 
     def __init__(self):
-        self._patient_id:      Optional[str] = "P-001"
+        self._patient_id:      Optional[str] = None   # set via switch_patient() before monitoring
         self._session_id:      Optional[str] = None
         self._is_monitoring:   bool          = False
 
@@ -75,7 +75,17 @@ class ECGService:
         self._db_flush_task  = asyncio.create_task(self._db_flush_loop(),  name="db_flush")
         self._broadcast_task = asyncio.create_task(self._broadcast_loop(), name="ws_broadcast")
         self._analysis_task  = asyncio.create_task(self._analysis_loop(),  name="ecg_analysis")
-        await self._open_session(self._patient_id)
+        # Only open a session if a patient has been explicitly set.
+        # On a fresh database (no patients yet) _patient_id is None; the
+        # session will be opened by the first switch_patient() call from
+        # the frontend after the user selects or registers a patient.
+        if self._patient_id:
+            await self._open_session(self._patient_id)
+        else:
+            logger.info(
+                "ECGService started in standby — no active patient. "
+                "Call switch_patient() to begin monitoring."
+            )
         logger.info("ECGService started.")
 
     async def stop(self) -> None:
@@ -159,7 +169,7 @@ class ECGService:
     def _on_sample(self, value: float) -> None:
         self._raw_buffer.append(value)
         self._bpm_estimator.push(value)
-        if self._session_id:
+        if self._session_id and self._patient_id:
             self._pending_samples.append({
                 "session_id": self._session_id,
                 "patient_id": self._patient_id,
@@ -193,6 +203,8 @@ class ECGService:
             await asyncio.sleep(_ANALYSIS_WINDOW)
             if len(self._raw_buffer) < fs:
                 continue
+            if not self._patient_id:
+                continue   # no patient selected yet — skip analysis
             try:
                 arr      = np.array(list(self._raw_buffer)[-window:], dtype=np.float64)
                 filtered = full_filter_pipeline(arr, fs=fs)
@@ -508,6 +520,10 @@ class ECGService:
     def is_monitoring(self) -> bool:          return self._is_monitoring
     @property
     def is_connected(self) -> bool:           return self._wifi_manager.is_connected
+    @property
+    def hardware_connected(self) -> bool:
+        """True only when a real ESP32 is connected (not mock/simulator)."""
+        return self._wifi_manager._device_ws is not None
     @property
     def active_patient_id(self) -> Optional[str]: return self._patient_id
 

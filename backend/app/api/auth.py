@@ -15,6 +15,7 @@ import re
 from datetime import timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -23,6 +24,7 @@ from app.core.security import (
     TokenData,
     create_access_token,
     create_refresh_token,
+    decode_token,
     get_current_user,
     hash_password,
     verify_password,
@@ -218,7 +220,80 @@ async def get_profile(
     )
 
 
-# ── Me (full details) ─────────────────────────────────────
+# ── Token Refresh ─────────────────────────────────────────
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/refresh", response_model=TokenResponse, summary="Refresh access token")
+async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Exchange a valid refresh token for a new access + refresh token pair.
+
+    The backend is stateless (JWT), so any non-expired refresh token that
+    was signed with the current JWT_SECRET is accepted.  The client should
+    call this automatically when it receives a 401 on any protected endpoint.
+    """
+    credentials_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired refresh token.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        token_data = decode_token(body.refresh_token)
+    except HTTPException:
+        raise credentials_exc
+
+    # Re-validate user still exists and is active
+    user = await crud.get_user_by_username(db, token_data.sub)
+    if not user or not user.is_active:
+        raise credentials_exc
+
+    # Issue a fresh pair
+    payload = {"sub": user.username, "role": user.role, "user_id": user.id}
+    new_access  = create_access_token(payload)
+    new_refresh = create_refresh_token(payload)
+
+    logger.info("Tokens refreshed for user '%s'", user.username)
+    return TokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+# ── Email Verification ────────────────────────────────────
+
+@router.get("/verify-email", summary="Verify email address via token link")
+async def verify_email(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Confirm an email verification link.
+
+    Currently the backend does not send verification emails, so this
+    endpoint accepts any valid JWT and returns a success response so the
+    frontend VerifyEmail page does not error out.  When email verification
+    is implemented, generate a short-lived signed token per-user here.
+    """
+    try:
+        token_data = decode_token(token)
+        user = await crud.get_user_by_username(db, token_data.sub)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        return {"success": True, "message": f"Email verified for {user.username}."}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification link.",
+        )
+
+
+
 
 @router.get("/me", response_model=UserResponse, summary="Get full current user record")
 async def get_me(

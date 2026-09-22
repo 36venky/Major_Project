@@ -53,6 +53,13 @@ class PatientBase(BaseModel):
     location:          Optional[str] = None   # "lat,lng"
     location_address:  Optional[str] = None
     maps_link:         Optional[str] = None
+    # Extended registration wizard fields
+    guardian_relation: Optional[str] = None   # relationship to patient, e.g. "Father"
+    doctor_name:       Optional[str] = None
+    doctor_hospital:   Optional[str] = None
+    ambulance_name:    Optional[str] = None
+    notes:             Optional[str] = None   # patient notes + medical notes combined
+    dob:               Optional[str] = None   # ISO date string, e.g. "1985-04-12"
 
 
 class PatientCreate(PatientBase):
@@ -60,10 +67,25 @@ class PatientCreate(PatientBase):
 
 
 class PatientUpdate(BaseModel):
-    name:              Optional[str] = None
-    age:               Optional[int] = None
-    gender:            Optional[str] = None
-    blood_group:       Optional[str] = None
+    """
+    All fields are optional.  A field that is *omitted* from the request body
+    is left unchanged in the database.  A field sent as ``null`` (or an empty
+    string) is written as NULL / empty — i.e. the caller can explicitly clear it.
+
+    We use ``model_config = ConfigDict(populate_by_name=True)`` and rely on
+    ``model_dump(exclude_unset=True)`` in the service layer so only the fields
+    the client actually sent are applied.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # ── Required-when-present validations ─────────────────
+    name:           Optional[str] = Field(default=None, min_length=2, max_length=120)
+    age:            Optional[int] = Field(default=None, ge=0, le=150)
+    gender:         Optional[str] = Field(default=None, max_length=20)
+    blood_group:    Optional[str] = Field(default=None, max_length=10)
+
+    # ── Freely nullable fields ─────────────────────────────
     height:            Optional[str] = None
     weight:            Optional[str] = None
     guardian_name:     Optional[str] = None
@@ -79,6 +101,13 @@ class PatientUpdate(BaseModel):
     location:          Optional[str] = None
     location_address:  Optional[str] = None
     maps_link:         Optional[str] = None
+    # Extended registration wizard fields
+    guardian_relation: Optional[str] = None
+    doctor_name:       Optional[str] = None
+    doctor_hospital:   Optional[str] = None
+    ambulance_name:    Optional[str] = None
+    notes:             Optional[str] = None
+    dob:               Optional[str] = None
 
 
 class PatientResponse(_ORMBase, PatientBase):

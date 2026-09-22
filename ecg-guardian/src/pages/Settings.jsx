@@ -45,7 +45,7 @@ export default function Settings() {
   const [healthForm, setHealthForm] = useState({
     bloodPressure: state.weeklyHealth.bloodPressure,
     bloodSugar:    state.weeklyHealth.bloodSugar,
-    weight:        state.patient.weight,
+    weight:        state.patient?.weight ?? '',   // patient may be null on first render
     updatedBy:     'Guardian',
     notes:         '',
   });

@@ -1,135 +1,105 @@
 /**
  * auth.js – Authentication service for ECG Guardian.
  *
- * Stores JWT token and user info in sessionStorage.
- * Exposes:
- *   registerUser(data)                           – POST /auth/register, returns { user } or throws
- *   loginWithCredentials(username, password)     – POST /auth/login, returns { token, user } or throws
- *   getToken()                                   – cached token or null
- *   getUserInfo()                                – cached user object or null
- *   clearToken()                                 – logout (clears sessionStorage)
- *   getAuthHeaders()                             – { Authorization: 'Bearer ...' } or {}
+ * Tokens stored in localStorage (persist across browser restarts).
+ * Keys:
+ *   ecg_access_token   – short-lived JWT
+ *   ecg_refresh_token  – long-lived JWT
+ *   ecg_user_info      – serialised user profile
  */
 
-const BASE_URL  = 'http://localhost:8000';
-const TOKEN_KEY = 'ecg_access_token';
-const USER_KEY  = 'ecg_user_info';
+const BASE_URL    = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+const ACCESS_KEY  = 'ecg_access_token';
+const REFRESH_KEY = 'ecg_refresh_token';
+const USER_KEY    = 'ecg_user_info';
 
 // ── Registration ──────────────────────────────────────────
 
-/**
- * Register a new user account.
- * On success: returns { user } (does NOT auto-login — user must sign in after).
- * On failure: throws an Error with a human-readable message.
- *
- * @param {Object} data – matches RegisterRequest schema
- */
 export async function registerUser(data) {
-  const res = await fetch(`${BASE_URL}/auth/register`, {
+  const res  = await fetch(`${BASE_URL}/auth/register`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(data),
   });
-
   const body = await res.json().catch(() => ({}));
-
   if (!res.ok) {
-    // FastAPI validation errors come as { detail: [...] } or { detail: "string" }
     const detail = body.detail;
-    if (Array.isArray(detail)) {
-      const msgs = detail.map(e => e.msg || JSON.stringify(e)).join(' • ');
-      throw new Error(msgs);
-    }
+    if (Array.isArray(detail)) throw new Error(detail.map(e => e.msg || JSON.stringify(e)).join(' • '));
     throw new Error(detail || `Registration failed (HTTP ${res.status}).`);
   }
-
   return { user: body };
 }
 
 // ── Login ─────────────────────────────────────────────────
 
-/**
- * Login with credentials (username or email + password).
- * On success: stores token + user info in sessionStorage and returns them.
- * On failure: throws an Error with a human-readable message.
- */
-export async function loginWithCredentials(username, password) {
+export async function loginWithCredentials(email, password) {
   const res = await fetch(`${BASE_URL}/auth/login`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ username, password }),
+    body:    JSON.stringify({ username: email, password }),
   });
-
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    const detail = body.detail;
-    if (res.status === 401) throw new Error('Incorrect username/email or password.');
-    if (res.status === 403) throw new Error(detail || 'Account deactivated.');
-    throw new Error(detail || `Login failed (HTTP ${res.status}). Check if the backend is running.`);
+    if (res.status === 401) throw new Error('Invalid email or password.');
+    if (res.status === 403) throw new Error(body.detail || 'Account deactivated.');
+    throw new Error(body.detail || `Login failed (HTTP ${res.status}).`);
   }
-
   const data = await res.json();
   if (!data.access_token) throw new Error('Server returned an invalid response.');
 
-  sessionStorage.setItem(TOKEN_KEY, data.access_token);
+  localStorage.setItem(ACCESS_KEY,  data.access_token);
+  localStorage.setItem(REFRESH_KEY, data.refresh_token);
 
-  // Fetch full profile to populate user info
-  let userInfo = { username, role: 'guardian', full_name: username };
+  // Fetch full user profile
+  let userInfo = { username: email, role: 'guardian', full_name: email };
   try {
-    const profileRes = await fetch(`${BASE_URL}/auth/profile`, {
+    const pr = await fetch(`${BASE_URL}/auth/profile`, {
       headers: { Authorization: `Bearer ${data.access_token}` },
     });
-    if (profileRes.ok) {
-      const profile = await profileRes.json();
+    if (pr.ok) {
+      const p = await pr.json();
       userInfo = {
-        username:       profile.username,
-        role:           profile.role,
-        full_name:      profile.full_name,
-        email:          profile.email       ?? null,
-        phone:          profile.phone       ?? null,
-        specialization: profile.specialization ?? null,
-        hospital:       profile.hospital    ?? null,
-        city:           profile.city        ?? null,
-        country:        profile.country     ?? null,
+        username:       p.username,
+        role:           p.role,
+        full_name:      p.full_name,
+        email:          p.email          ?? null,
+        phone:          p.phone          ?? null,
+        specialization: p.specialization ?? null,
+        hospital:       p.hospital       ?? null,
+        city:           p.city           ?? null,
+        country:        p.country        ?? null,
       };
     }
-  } catch { /* profile fetch failure is non-fatal */ }
+  } catch { /* non-fatal */ }
 
-  sessionStorage.setItem(USER_KEY, JSON.stringify(userInfo));
+  localStorage.setItem(USER_KEY, JSON.stringify(userInfo));
   return { token: data.access_token, user: userInfo };
 }
 
 // ── Token helpers ─────────────────────────────────────────
 
-/** Return the cached JWT token, or null if not logged in. */
-export function getToken() {
-  return sessionStorage.getItem(TOKEN_KEY) ?? null;
-}
+export function getToken()        { return localStorage.getItem(ACCESS_KEY)  ?? null; }
+export function getRefreshToken() { return localStorage.getItem(REFRESH_KEY) ?? null; }
 
-/** Return cached user info object, or null. */
 export function getUserInfo() {
-  const raw = sessionStorage.getItem(USER_KEY);
+  const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-/** Clear token and user info (logout). */
 export function clearToken() {
-  sessionStorage.removeItem(TOKEN_KEY);
-  sessionStorage.removeItem(USER_KEY);
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(USER_KEY);
+  localStorage.removeItem('ecg_active_patient');  // remove any legacy patient persistence
 }
 
-/** Synchronous: return auth headers if token is cached, else {}. */
 export function authHeaders() {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-/**
- * Async: return auth headers.
- * Does NOT auto-login — returns {} if the user is not logged in.
- */
 export async function getAuthHeaders() {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
 }

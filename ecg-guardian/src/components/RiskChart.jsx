@@ -8,11 +8,12 @@ import Plot from 'react-plotly.js';
 import { useApp } from '../context/AppContext';
 import { getAuthHeaders } from '../services/auth';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 export default function RiskChart() {
   const { state } = useApp();
-  const patientId = state.patient.id;
+  // patient may be null while the backend fetch is in-flight or DB is empty
+  const patientId = state.patient?.id ?? null;
 
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);

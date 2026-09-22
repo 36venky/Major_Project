@@ -7,7 +7,7 @@ import { X, UserPlus, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getAuthHeaders } from '../services/auth';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 const BLOOD_GROUPS  = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const GENDERS       = ['Male', 'Female', 'Other'];

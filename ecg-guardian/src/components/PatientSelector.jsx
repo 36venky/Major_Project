@@ -4,14 +4,15 @@
  */
 import { useEffect, useState, useCallback } from 'react';
 import { ChevronDown, Loader2, RefreshCw } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { useApp, patientFromBackend } from '../context/AppContext';
 import { getAuthHeaders } from '../services/auth';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 export default function PatientSelector() {
   const { state, dispatch } = useApp();
-  const activeId = state.patient.id;
+  // patient may be null — use optional chaining so the selector doesn't crash
+  const activeId = state.patient?.id ?? '';
 
   const [patients,   setPatients]   = useState([]);
   const [switching,  setSwitching]  = useState(false);
@@ -69,23 +70,11 @@ export default function PatientSelector() {
         return;
       }
 
-      // Update global patient state immediately
+      // Update global patient state using the canonical mapper so all
+      // new fields (doctor_name, guardian_relation, dob, notes, etc.) are included
       const selected = patients.find(p => p.patient_id === newId);
       if (selected) {
-        dispatch({
-          type: 'UPDATE_PATIENT',
-          payload: {
-            id:               selected.patient_id,
-            name:             selected.name,
-            age:              selected.age,
-            gender:           selected.gender,
-            bloodGroup:       selected.blood_group,
-            height:           selected.height   || '—',
-            weight:           selected.weight   || '—',
-            guardianName:     selected.guardian_name  || '—',
-            emergencyContact: selected.guardian_phone || selected.emergency_contact || '—',
-          },
-        });
+        dispatch({ type: 'UPDATE_PATIENT', payload: patientFromBackend(selected) });
         dispatch({
           type: 'ADD_NOTIFICATION',
           payload: {

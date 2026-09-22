@@ -1,12 +1,22 @@
 /**
- * useWebSocket – Connects to FastAPI /ws/ecg, handles ECG + risk prediction data.
+ * useWebSocket – Connects to FastAPI /ws/ecg with JWT auth.
  * Falls back to a client-side simulator when the backend is unreachable.
+ *
+ * Token expiry handling
+ * ─────────────────────
+ * When the backend rejects a connection with {"error": "..."} (expired or
+ * invalid token), the hook:
+ *   1. Stops reconnecting immediately (no infinite retry loop).
+ *   2. Tries to refresh the access token via POST /auth/refresh.
+ *   3. On success — reconnects with the new token.
+ *   4. On failure — clears all tokens and redirects to /login.
  */
 import { useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import { getToken } from '../services/auth';
+import { getToken, getRefreshToken, clearToken } from '../services/auth';
 
-const WS_BASE_URL     = 'ws://localhost:8000/ws/ecg';
+const WS_BASE_URL     = `${import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000'}/ws/ecg`;
+const API_BASE_URL    = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 const RECONNECT_DELAY = 5000;
 
 /* ── Client-side ECG simulator (fallback) ───────────────── */
@@ -19,9 +29,55 @@ function generateECGPoint(t) {
   if (cycle > 0.28 && cycle < 0.33) { const q = (cycle - 0.28) / 0.05; v -= 0.12 * Math.sin(Math.PI * q); }
   if (cycle > 0.33 && cycle < 0.42) { const r = (cycle - 0.33) / 0.09; v += 1.0  * Math.sin(Math.PI * r); }
   if (cycle > 0.42 && cycle < 0.47) { const s = (cycle - 0.42) / 0.05; v -= 0.18 * Math.sin(Math.PI * s); }
-  if (cycle > 0.52 && cycle < 0.72) { const tw= (cycle - 0.52) / 0.20; v += 0.22 * Math.sin(Math.PI * tw);}
+  if (cycle > 0.52 && cycle < 0.72) { const tw= (cycle - 0.52) / 0.20; v += 0.22 * Math.sin(Math.PI * tw); }
   v += (Math.random() + Math.random() + Math.random() - 1.5) * 0.012;
   return parseFloat(v.toFixed(4));
+}
+
+/* ── Token helpers ──────────────────────────────────────── */
+
+/** True if the stored access token exists and has not expired yet. */
+function isAccessTokenValid() {
+  const token = getToken();
+  if (!token) return false;
+  try {
+    const { exp } = JSON.parse(atob(token.split('.')[1]));
+    if (!exp) return true;
+    return Date.now() / 1000 < exp - 10; // 10-second buffer
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Attempt a silent token refresh.
+ * Returns the new access token on success, null on failure.
+ */
+async function silentRefresh() {
+  const rt = getRefreshToken();
+  if (!rt) return null;
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ refresh_token: rt }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.access_token) return null;
+    localStorage.setItem('ecg_access_token',  data.access_token);
+    localStorage.setItem('ecg_refresh_token', data.refresh_token);
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
+function redirectToLogin() {
+  clearToken();
+  if (!window.location.pathname.startsWith('/login')) {
+    window.location.replace('/login');
+  }
 }
 
 /* ── Hook ───────────────────────────────────────────────── */
@@ -39,7 +95,6 @@ export function useWebSocket() {
     if (simRef.current) return;
     const INTERVAL = 40;
     const STEP     = INTERVAL / 1000;
-
     simRef.current = setInterval(() => {
       const batch = [];
       for (let i = 0; i < 5; i++) {
@@ -47,7 +102,6 @@ export function useWebSocket() {
         batch.push({ time: Date.now() + i, value: generateECGPoint(tRef.current) });
       }
       dispatch({ type: 'APPEND_ECG', payload: batch });
-
       bpmTimerRef.current++;
       if (bpmTimerRef.current % 25 === 0) {
         const bpm = Math.round(75 + 6 * Math.sin(tRef.current * 0.04));
@@ -64,34 +118,85 @@ export function useWebSocket() {
   const connect = useCallback(async () => {
     if (stoppedRef.current) return;
 
-    // getToken() is now synchronous — no auto-login.
-    // If no token exists the user hasn't logged in yet; start simulator.
-    const token = getToken();
+    // ── Token check before connecting ────────────────────
+    // If the stored access token is already expired, try to refresh it silently
+    // before opening the WebSocket.  This avoids the infinite reject loop.
+    let token = getToken();
 
     if (!token) {
+      // Not logged in — run simulator, no WS needed
       startSimulator();
       return;
+    }
+
+    if (!isAccessTokenValid()) {
+      // Token expired — try silent refresh first
+      const newToken = await silentRefresh();
+      if (!newToken) {
+        // Refresh token also expired or absent → must log in again
+        redirectToLogin();
+        return;
+      }
+      token = newToken;
     }
 
     try {
       const ws = new WebSocket(`${WS_BASE_URL}?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
-      ws.onopen = () => {
+      ws.onopen = async () => {
+        if (stoppedRef.current) return;
         stopSimulator();
         dispatch({ type: 'UPDATE_DEVICE', payload: { connected: true, status: 'Active' } });
         addTimelineEvent({ event: 'Backend Connected', icon: 'wifi', color: 'green' });
+
+        // Query /health once to learn whether a real ESP32 is connected
+        // (is_connected is true in both mock and hardware modes; hardware_connected is not)
+        try {
+          const res = await fetch(`${API_BASE_URL}/health`);
+          if (res.ok) {
+            const h = await res.json();
+            dispatch({
+              type: 'UPDATE_DEVICE',
+              payload: { hardwareConnected: h.hardware_connected === true },
+            });
+          }
+        } catch { /* non-fatal — assume no hardware */ }
       };
 
-      ws.onmessage = (e) => {
+      ws.onmessage = async (e) => {
+        if (stoppedRef.current) return;
         try {
           const data = JSON.parse(e.data);
-          if (data.error) return; // auth/protocol error frame
 
-          // ── WhatsApp send-status notification ───────────
-          // Backend pushes one of these after each Twilio attempt.
+          // ── Auth error frame from backend ────────────────
+          // Backend sends {"error": "Invalid or expired token."} then closes.
+          // We should NOT reconnect with the same token — try refresh first.
+          if (data.error) {
+            const isAuthError = /token|expired|auth/i.test(data.error);
+            if (isAuthError) {
+              ws.onclose = null; // prevent double-handling in onclose
+              ws.close();
+              stopSimulator();
+              dispatch({ type: 'UPDATE_DEVICE', payload: { connected: false, status: 'Reconnecting…' } });
+
+              const newToken = await silentRefresh();
+              if (!newToken) {
+                redirectToLogin();
+                return;
+              }
+              // Successfully refreshed — reconnect immediately
+              if (!stoppedRef.current) {
+                clearTimeout(reconnectRef.current);
+                reconnectRef.current = setTimeout(connect, 500);
+              }
+            }
+            return;
+          }
+
+          // ── WhatsApp send-status notification ────────────
           if (data.type === 'whatsapp_status') {
-            const ok  = data.status === 'sent';
+            const ok = data.status === 'sent';
             dispatch({
               type: 'ADD_NOTIFICATION',
               payload: {
@@ -104,52 +209,46 @@ export function useWebSocket() {
                 alert_type:  data.alert_type,
               },
             });
-            return; // nothing else to process in this frame
+            return;
           }
 
-          // ECG sample — normalise ADC 0–4095 → [-1, 1]
+          // ── ECG sample — normalise ADC 0–4095 → [-1, 1] ─
           if (data.ecg !== undefined) {
-            const normalised = (data.ecg - 2048) / 2048;
             dispatch({
               type: 'APPEND_ECG',
-              payload: [{ time: Date.now(), value: normalised }],
+              payload: [{ time: Date.now(), value: (data.ecg - 2048) / 2048 }],
             });
           }
 
-          // Heart rate
+          // ── Heart rate ───────────────────────────────────
           if (data.bpm !== undefined && data.bpm > 0) {
             dispatch({ type: 'SET_HEART_RATE', payload: data.bpm });
           }
 
-          // AI analysis (rhythm, confidence, riskLevel, etc.)
-          // Only update if backend has actual analysis (arrhythmia != null)
+          // ── AI analysis ──────────────────────────────────
           if (data.analysis) {
             dispatch({ type: 'SET_AI_ANALYSIS', payload: data.analysis });
-
-            // Live risk prediction embedded in analysis (Feature 5)
             if (data.analysis.riskPrediction) {
               dispatch({
                 type: 'SET_RISK_PREDICTION',
-                payload: {
-                  ...data.analysis.riskPrediction,
-                  timestamp: data.timestamp,
-                },
+                payload: { ...data.analysis.riskPrediction, timestamp: data.timestamp },
               });
             }
           }
-          // If analysis is null, leave existing state intact (don't flash stale defaults)
 
-          // Signal quality
+          // ── Signal quality ───────────────────────────────
           if (data.quality_pct !== undefined) {
             dispatch({ type: 'UPDATE_DEVICE', payload: { signalQuality: data.quality_pct } });
           }
+
         } catch { /* ignore malformed frames */ }
       };
 
       ws.onclose = () => {
         if (stoppedRef.current) return;
-        dispatch({ type: 'UPDATE_DEVICE', payload: { connected: false, status: 'Disconnected' } });
+        dispatch({ type: 'UPDATE_DEVICE', payload: { connected: false, hardwareConnected: false, status: 'Disconnected' } });
         startSimulator();
+        // Normal network close — schedule a reconnect (token will be re-validated then)
         reconnectRef.current = setTimeout(connect, RECONNECT_DELAY);
       };
 
@@ -171,7 +270,7 @@ export function useWebSocket() {
       clearTimeout(reconnectRef.current);
       if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { startSimulator, stopSimulator };
 }
