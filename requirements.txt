@@ -1,0 +1,60 @@
+# ECG Guardian – Root-level Python dependencies
+# Covers: backend/, Model/, M2/, Trail/
+# Install with: pip install -r requirements.txt
+
+# ── Web framework (backend + Trail/app.py) ─────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+
+# ── Database (backend) ─────────────────────────────────────
+sqlalchemy==2.0.36
+aiosqlite==0.20.0           # SQLite async driver (local dev)
+asyncpg==0.30.0             # PostgreSQL async driver (Neon cloud)
+
+# ── Validation (backend) ───────────────────────────────────
+pydantic==2.10.3
+pydantic-settings==2.7.0
+
+# ── Signal processing (backend + M2/Preprocess.py) ─────────
+numpy==2.2.1
+scipy==1.14.1
+
+# ── Authentication (backend) ───────────────────────────────
+python-jose[cryptography]==3.3.0
+bcrypt==4.2.1
+python-multipart==0.0.20
+
+# ── Configuration (backend + Trail/Twilio) ─────────────────
+PyYAML==6.0.2
+python-dotenv==1.0.1
+
+# ── PDF generation (backend) ───────────────────────────────
+reportlab==4.2.5
+
+# ── Background tasks (backend) ─────────────────────────────
+apscheduler==3.10.4
+
+# ── HTTP client (backend + testing) ────────────────────────
+httpx==0.28.1
+
+# ── ML risk prediction (Model/predict.py + M2/Preprocess.py) ─
+xgboost==2.1.3
+scikit-learn==1.6.1
+joblib==1.4.2
+pandas==2.2.3
+
+# ── ECG dataset loader (M2/Preprocess.py) ──────────────────
+wfdb==4.1.2
+
+# ── Serial port reader (Trail/py.py) ───────────────────────
+pyserial==3.5
+
+# ── Data visualisation (Trail/py.py + Trail/plot_ecg.py) ───
+matplotlib==3.10.0
+
+# ── WhatsApp alerts (backend + Trail/Twilio/test_twilio.py) ─
+twilio==9.4.5
+
+# ── Testing (backend/tests/) ───────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.25.0
