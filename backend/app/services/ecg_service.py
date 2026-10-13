@@ -413,25 +413,26 @@ class ECGService:
                 recent = list(self._raw_buffer)[-samples_per_frame:]
 
                 # Build the riskPrediction sub-object once per broadcast tick
+                # maybe_predict() returns None or a complete dict with all keys
                 risk_prediction = None
                 if risk:
                     risk_prediction = {
                         # backward-compat fields (RiskCard already uses these)
-                        "risk_percentage": risk.get("confidence",     0.0),
-                        "risk_level":      risk.get("risk_level",     "Low"),
-                        "majority_label":  risk.get("majority_label", "N"),
-                        "beat_type":       risk.get("beat_type",      "Normal Sinus Beat"),
+                        "risk_percentage": risk["confidence"],
+                        "risk_level":      risk["risk_level"],
+                        "majority_label":  risk["majority_label"],
+                        "beat_type":       risk["beat_type"],
                         # new XGBoost fields
-                        "xgb_bpm":         risk.get("xgb_bpm",        0.0),
-                        "min_bpm":         risk.get("min_bpm",         0.0),
-                        "max_bpm":         risk.get("max_bpm",         0.0),
-                        "confidence":      risk.get("confidence",      0.0),
-                        "sdnn_ms":         risk.get("sdnn_ms",         0.0),
-                        "rmssd_ms":        risk.get("rmssd_ms",        0.0),
-                        "abnormal_ratio":  risk.get("abnormal_ratio",  0.0),
-                        "abnormal_pct":    risk.get("abnormal_pct",    0.0),
-                        "risk_score":      risk.get("risk_score",      0),
-                        "risk_label":      risk.get("risk_label",      "Low"),
+                        "xgb_bpm":         risk["xgb_bpm"],
+                        "min_bpm":         risk["min_bpm"],
+                        "max_bpm":         risk["max_bpm"],
+                        "confidence":      risk["confidence"],
+                        "sdnn_ms":         risk["sdnn_ms"],
+                        "rmssd_ms":        risk["rmssd_ms"],
+                        "abnormal_ratio":  risk["abnormal_ratio"],
+                        "abnormal_pct":    risk["abnormal_pct"],
+                        "risk_score":      risk["risk_score"],
+                        "risk_label":      risk["risk_label"],
                     }
 
                 for ecg_val in recent:

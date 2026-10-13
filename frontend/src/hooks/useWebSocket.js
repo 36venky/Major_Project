@@ -224,23 +224,23 @@ export function useWebSocket() {
               type: 'SET_AI_ANALYSIS',
               payload: {
                 // Arrhythmia / rule-based (existing)
-                rhythm:         a.rhythm         ?? undefined,
-                confidence:     a.confidence     ?? undefined,
-                riskLevel:      a.riskLevel      ?? undefined,
-                signalQuality:  a.signalQuality  ?? undefined,
-                heartRateTrend: a.heartRateTrend ?? undefined,
+                rhythm:         a.rhythm,
+                confidence:     a.confidence,
+                riskLevel:      a.riskLevel,
+                signalQuality:  a.signalQuality,
+                heartRateTrend: a.heartRateTrend,
                 // Append new events (keep last 10)
                 ...(events.length > 0 ? { recentEvents: events } : {}),
                 // XGBoost M2 pipeline fields (new)
-                xgbBpm:         a.xgbBpm         ?? undefined,
-                xgbConfidence:  a.xgbConfidence  ?? undefined,
-                xgbRiskScore:   a.xgbRiskScore   ?? undefined,
-                xgbRiskLabel:   a.xgbRiskLabel   ?? undefined,
-                xgbBeatClass:   a.xgbBeatClass   ?? undefined,
-                xgbBeatType:    a.xgbBeatType    ?? undefined,
-                sdnn:           a.sdnn           ?? undefined,
-                rmssd:          a.rmssd          ?? undefined,
-                abnormalPct:    a.abnormalPct    ?? undefined,
+                xgbBpm:         a.xgbBpm,
+                xgbConfidence:  a.xgbConfidence,
+                xgbRiskScore:   a.xgbRiskScore,
+                xgbRiskLabel:   a.xgbRiskLabel,
+                xgbBeatClass:   a.xgbBeatClass,
+                xgbBeatType:    a.xgbBeatType,
+                sdnn:           a.sdnn,
+                rmssd:          a.rmssd,
+                abnormalPct:    a.abnormalPct,
               },
             });
 
