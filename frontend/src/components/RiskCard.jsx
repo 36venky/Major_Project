@@ -35,17 +35,6 @@ const LABEL_TITLE = {
   Q: 'Unclassifiable Beat',
 };
 
-function StatRow({ label, value, mono = false }) {
-  return (
-    <div className="flex items-center justify-between py-1">
-      <span className="text-[11px] text-slate-400">{label}</span>
-      <span className={`text-[11px] font-semibold text-slate-700 ${mono ? 'font-mono' : ''}`}>
-        {value ?? '—'}
-      </span>
-    </div>
-  );
-}
-
 export default function RiskCard() {
   const { state } = useApp();
   const risk = state.riskPrediction;
@@ -69,7 +58,8 @@ export default function RiskCard() {
   const badgeKey   = LEVEL_STYLES[riskLabel] ? riskLabel : confLevel;
   const styles     = LEVEL_STYLES[badgeKey] || LEVEL_STYLES.Low;
 
-  // Loading state: hardware connected but XGBoost window not yet full
+  // Loading state: hardware connected but XGBoost window not yet full (10 seconds)
+  // Mutually exclusive with no-data state (hardware disconnected)
   const isCollectingBaseline = hardwareConnected && !risk;
 
   return (
@@ -188,6 +178,7 @@ export default function RiskCard() {
           <p className="text-[10px] text-slate-400">Updated {ts}</p>
         </div>
 
+        {/* Loading indicator: hardware connected, waiting for 10-second XGBoost window */}
         {isCollectingBaseline && (
           <div className="flex items-center justify-center gap-2 py-3 px-4 rounded-lg
             bg-blue-50 border border-blue-100">
@@ -204,7 +195,8 @@ export default function RiskCard() {
           </div>
         )}
 
-        {!risk && !hardwareConnected && (
+        {/* No-data fallback: hardware NOT connected (mutually exclusive with loading state) */}
+        {!hardwareConnected && !risk && (
           <p className="text-xs text-slate-400 text-center py-2">
             Awaiting hardware connection…
           </p>

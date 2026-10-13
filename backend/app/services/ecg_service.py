@@ -412,8 +412,10 @@ class ECGService:
                 samples_per_frame = max(1, int(settings.SAMPLING_RATE * _BROADCAST_INTERVAL))
                 recent = list(self._raw_buffer)[-samples_per_frame:]
 
-                # Build the riskPrediction sub-object once per broadcast tick
-                # maybe_predict() returns None or a complete dict with all keys
+                # Build the riskPrediction sub-object once per broadcast tick.
+                # prediction_service.maybe_predict() returns None or a complete dict
+                # with all keys (verified in process_window() return statement).
+                # Using .get() defensively below is safe but technically redundant.
                 risk_prediction = None
                 if risk:
                     risk_prediction = {
