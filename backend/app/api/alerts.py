@@ -3,9 +3,12 @@ api/alerts.py
 ──────────────
 Alert management endpoints.
 
-GET  /alerts                  – list alerts for a patient
-POST /alerts/{id}/resolve     – mark alert as resolved
-POST /alerts/send-report      – manually send WhatsApp status report
+GET  /alerts                        – list alerts for a patient
+POST /alerts/{id}/resolve           – mark alert as resolved
+POST /alerts/send-report            – manually send WhatsApp status report
+GET  /alerts/cooldowns              – inspect current WhatsApp cooldown state (admin)
+DELETE /alerts/cooldowns            – reset all WhatsApp cooldowns (admin)
+DELETE /alerts/cooldowns/{patient_id}/{alert_type} – reset one specific cooldown (admin)
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
-from app.core.security import TokenData, get_current_user
+from app.core.security import TokenData, get_current_user, require_admin
 from app.database import crud
 from app.database.database import get_db
 from app.database.schemas import AlertResponse, APIResponse
@@ -26,12 +29,10 @@ from app.services.ecg_service import ecg_service
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
-_DEFAULT_PATIENT = "P-001"
-
 
 @router.get("", response_model=List[AlertResponse], summary="List alerts")
 async def list_alerts(
-    patient_id: str   = Query(default=_DEFAULT_PATIENT),
+    patient_id: str   = Query(default=None, description="Patient ID (defaults to active patient)"),
     resolved:   Optional[bool] = Query(default=None, description="Filter by resolved status"),
     limit:      int   = Query(default=50, ge=1, le=200),
     db: AsyncSession  = Depends(get_db),
@@ -41,13 +42,14 @@ async def list_alerts(
     Return alerts for a patient.
 
     Args:
-        patient_id: Patient identifier.
+        patient_id: Patient identifier (defaults to currently active patient).
         resolved:   If True, return only resolved alerts.
                     If False, return only active alerts.
                     If None (default), return all alerts.
         limit:      Maximum number of records to return.
     """
-    return await crud.get_alerts(db, patient_id, resolved=resolved, limit=limit)
+    resolved_patient_id = patient_id or ecg_service.active_patient_id or "P-001"
+    return await crud.get_alerts(db, resolved_patient_id, resolved=resolved, limit=limit)
 
 
 @router.post("/{alert_id}/resolve", response_model=AlertResponse, summary="Resolve an alert")
@@ -65,7 +67,7 @@ async def resolve_alert(
 
 
 class SendReportRequest(BaseModel):
-    patient_id: str = _DEFAULT_PATIENT
+    patient_id: Optional[str] = None   # defaults to active patient if omitted
 
 
 @router.post("/send-report", response_model=APIResponse, summary="Send manual WhatsApp status report")
@@ -84,9 +86,10 @@ async def send_whatsapp_report(
     if not whatsapp_service._enabled:
         raise NotFoundError("WhatsApp service is not configured (check Twilio credentials in .env).")
 
-    patient = await crud.get_patient(db, body.patient_id)
+    resolved_patient_id = body.patient_id or ecg_service.active_patient_id or "P-001"
+    patient = await crud.get_patient(db, resolved_patient_id)
     if not patient:
-        raise NotFoundError(f"Patient '{body.patient_id}' not found.")
+        raise NotFoundError(f"Patient '{resolved_patient_id}' not found.")
 
     if not patient.guardian_phone:
         raise NotFoundError(f"No guardian phone number set for patient '{body.patient_id}'.")
@@ -145,3 +148,71 @@ async def send_whatsapp_report(
     await loop.run_in_executor(None, _do_send)
 
     return APIResponse(message=f"Status report sent to {patient.guardian_phone}.")
+
+
+# ── WhatsApp cooldown inspection / management (admin only) ────────────────────
+
+@router.get(
+    "/cooldowns",
+    response_model=List[dict],
+    summary="Inspect WhatsApp cooldown state (admin)",
+    tags=["Alerts"],
+)
+async def get_cooldown_status(
+    _: TokenData = Depends(require_admin),
+):
+    """
+    Return the current WhatsApp cooldown state for every
+    (patient_id, alert_type) pair.
+
+    Shows which alert types are still on cooldown and how many seconds remain.
+    Requires admin role.
+    """
+    from app.services.twilio_service import whatsapp_service
+    return whatsapp_service.cooldown_status()
+
+
+@router.delete(
+    "/cooldowns",
+    response_model=APIResponse,
+    summary="Reset ALL WhatsApp cooldowns (admin)",
+    tags=["Alerts"],
+)
+async def reset_all_cooldowns(
+    _: TokenData = Depends(require_admin),
+):
+    """
+    Clear every WhatsApp cooldown entry so the next qualifying alert
+    will send immediately.  Use after testing or after a configuration change.
+    Requires admin role.
+    """
+    from app.services.twilio_service import whatsapp_service
+    count = whatsapp_service.reset_cooldown()
+    return APIResponse(message=f"All WhatsApp cooldowns cleared ({count} entries removed).")
+
+
+@router.delete(
+    "/cooldowns/{patient_id}/{alert_type}",
+    response_model=APIResponse,
+    summary="Reset one specific WhatsApp cooldown (admin)",
+    tags=["Alerts"],
+)
+async def reset_single_cooldown(
+    patient_id: str,
+    alert_type: str,
+    _: TokenData = Depends(require_admin),
+):
+    """
+    Clear the cooldown for a specific patient + alert_type combination.
+    The next matching alert will be dispatched immediately.
+    Requires admin role.
+    """
+    from app.services.twilio_service import whatsapp_service
+    count = whatsapp_service.reset_cooldown(patient_id=patient_id, alert_type=alert_type)
+    if count == 0:
+        raise NotFoundError(
+            f"No active cooldown found for patient='{patient_id}' type='{alert_type}'."
+        )
+    return APIResponse(
+        message=f"Cooldown cleared for patient={patient_id} type={alert_type}."
+    )

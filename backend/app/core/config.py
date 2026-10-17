@@ -71,13 +71,16 @@ class Settings(BaseSettings):
     PORT: int = _get("server.port", 8000)
 
     # ── Device (ESP32 WiFi) ────────────────────────────────
-    MOCK_WHEN_UNAVAILABLE: bool = _get("device.mock_when_unavailable", True)
-    MOCK_CONNECT_TIMEOUT: float = _get("device.mock_connect_timeout",  10.0)
-    SAMPLING_RATE: int          = _get("device.sampling_rate",         250)
+    # Simulation is fully removed — ESP32 hardware is required.
+    SAMPLING_RATE: int = _get("device.sampling_rate", 192)   # Hz — ESP32 actual rate
 
     # ── Database ───────────────────────────────────────────
-    DATABASE_PATH: str = _get("database.path", "data/ecg_guardian.db")
-    DATABASE_ECHO: bool= _get("database.echo", False)
+    # Set DATABASE_TYPE=postgresql and DATABASE_URL=<neon-url> in .env to
+    # use Neon cloud PostgreSQL.  Omit both for local SQLite (dev only).
+    DATABASE_TYPE: str         = "sqlite"   # overridden by .env → "postgresql"
+    DATABASE_URL: Optional[str] = None      # overridden by .env → full Neon URL
+    DATABASE_PATH: str         = _get("database.path", "data/ecg_guardian.db")
+    DATABASE_ECHO: bool        = _get("database.echo", False)
 
     # ── Retention ──────────────────────────────────────────
     RAW_ECG_RETENTION_HOURS: int    = _get("retention.raw_ecg_hours",        48)
@@ -106,8 +109,8 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int      = _get("security.refresh_token_expire_days",    7)
 
     # ── Logging ────────────────────────────────────────────
-    LOG_LEVEL: str  = _get("logging.level",       "INFO")
-    LOG_MAX_BYTES: int = _get("logging.max_bytes", 10485760)
+    LOG_LEVEL: str     = _get("logging.level",        "INFO")
+    LOG_MAX_BYTES: int = _get("logging.max_bytes",    10485760)
     LOG_BACKUP_COUNT: int = _get("logging.backup_count", 5)
 
     # ── WebSocket ──────────────────────────────────────────
@@ -115,15 +118,41 @@ class Settings(BaseSettings):
     WS_MAX_CONNECTIONS: int      = _get("websocket.max_connections",     20)
 
     @property
+    def is_postgres(self) -> bool:
+        """True when connected to PostgreSQL (Neon)."""
+        return self.DATABASE_TYPE.lower() == "postgresql" and bool(self.DATABASE_URL)
+
+    @property
     def database_url(self) -> str:
-        """SQLite async URL for aiosqlite."""
+        """
+        Async database URL.
+
+        • PostgreSQL (Neon): reads DATABASE_URL from .env directly.
+          The URL must already use the asyncpg driver:
+          postgresql+asyncpg://...
+        • SQLite (fallback): builds sqlite+aiosqlite:/// path.
+        """
+        if self.is_postgres:
+            url = self.DATABASE_URL
+            # Ensure the asyncpg driver prefix is used
+            if url.startswith("postgresql://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+            return url
+        # SQLite fallback
         db_path = ROOT_DIR / self.DATABASE_PATH
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite+aiosqlite:///{db_path}"
 
     @property
     def database_url_sync(self) -> str:
-        """Synchronous SQLite URL (used only for Alembic / tests)."""
+        """Synchronous URL (Alembic / tests only)."""
+        if self.is_postgres:
+            url = self.DATABASE_URL
+            if url.startswith("postgresql+asyncpg://"):
+                url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+            return url
         db_path = ROOT_DIR / self.DATABASE_PATH
         return f"sqlite:///{db_path}"
 

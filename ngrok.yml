@@ -1,0 +1,9 @@
+version: 2
+tunnels:
+  frontend:
+    proto: http
+    addr: 5173
+    inspect: true
+    request_header:
+      add:
+        - "ngrok-skip-browser-warning: true"

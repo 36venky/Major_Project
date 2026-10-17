@@ -99,9 +99,12 @@ async def upsert_location(
 
     await crud.update_patient(db, patient_id, {
         "location":         f"{lat},{lng}",
-        "location_address": body.location_address,
         "maps_link":        link,
     })
+    # location_address may legitimately be None (user didn't supply one), so set directly
+    patient.location_address = body.location_address
+    await db.flush()
+    await db.commit()
 
     return LocationResponse(
         patient_id=patient_id,
@@ -128,16 +131,12 @@ async def delete_location(
     if not patient:
         raise NotFoundError(f"Patient '{patient_id}' not found.")
 
-    await crud.update_patient(db, patient_id, {
-        "location":         None,
-        "location_address": None,
-        "maps_link":        None,
-    })
-    # crud.update_patient skips None values — force-clear by direct setattr
-    patient = await crud.get_patient(db, patient_id)
+    # crud.update_patient skips None values, so force-clear by direct setattr
     if patient:
         patient.location         = None
         patient.location_address = None
         patient.maps_link        = None
+        await db.flush()
+    await db.commit()
 
     return APIResponse(message=f"Location cleared for patient {patient_id}.")

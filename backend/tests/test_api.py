@@ -143,9 +143,13 @@ async def test_create_weekly_health(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_get_weekly_health_not_found(client, auth_headers):
+async def test_get_weekly_health_no_records_returns_empty(client, auth_headers):
+    """Endpoint returns 200 with empty fields when no records exist (not 404)."""
     resp = await client.get("/weekly-health?patient_id=NOBODY", headers=auth_headers)
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["blood_pressure"] is None
+    assert data["blood_sugar"] is None
 
 
 # ─────────────────────────────────────────────────────────────

@@ -89,7 +89,17 @@ async def bp_reminder_check() -> None:
                 if record is None:
                     logger.warning("BP reminder: patient %s has NO health records", p.patient_id)
                 else:
-                    age_days = (datetime.now(timezone.utc) - record.date.replace(tzinfo=timezone.utc)).days
+                    record_dt = record.date
+                    # Normalise to UTC-aware datetime regardless of what DB returned
+                    if hasattr(record_dt, "tzinfo"):
+                        if record_dt.tzinfo is None:
+                            record_dt = record_dt.replace(tzinfo=timezone.utc)
+                    else:
+                        # bare date object — convert to midnight UTC datetime
+                        from datetime import datetime as _dt
+                        record_dt = _dt(record_dt.year, record_dt.month, record_dt.day,
+                                        tzinfo=timezone.utc)
+                    age_days = (datetime.now(timezone.utc) - record_dt).days
                     if age_days >= 7:
                         logger.warning(
                             "BP reminder: patient %s — last update was %d days ago",

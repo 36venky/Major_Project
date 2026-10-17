@@ -348,27 +348,35 @@ class ECGService:
         while True:
             # Run every 2 s to match the XGBoost prediction cadence
             await asyncio.sleep(2)
-            # Analysis runs unconditionally when hardware is connected
-            # (DB writes and alerts remain gated by _storage_enabled)
+            # Require hardware connected and at least 1 second of data
             if not self._wifi_manager.is_connected or len(self._raw_buffer) < fs:
                 continue
             try:
                 arr      = np.array(list(self._raw_buffer)[-window:], dtype=np.float64)
                 filtered = full_filter_pipeline(arr, fs=fs)
 
+                # Signal quality is always assessed (shown in live preview)
                 self._current_quality = assess_signal_quality(arr, filtered, fs)
 
+                # BPM from R-peak RR intervals — waits for enough samples
                 bpm = self._bpm_estimator.get_bpm()
                 if bpm > 0:
                     self._current_bpm = bpm
-                    self._bpm_history.append(bpm)
+                    # Only accumulate BPM history during active recording
+                    if self._storage_enabled:
+                        self._bpm_history.append(bpm)
+
+                # Arrhythmia + XGBoost only run when recording is active
+                # (Start has been clicked).  Live ECG preview continues regardless.
+                if not self._storage_enabled:
+                    continue
 
                 from app.processing.r_peak_detection import detect_r_peaks
                 peaks = detect_r_peaks(filtered, fs)
                 self._current_arrhythmia = classify(peaks, bpm, fs)
 
                 # Alerts only fire during recording
-                if self._storage_enabled and self._alert_engine:
+                if self._alert_engine:
                     self._alert_engine.evaluate(
                         bpm=self._current_bpm,
                         quality=self._current_quality,
@@ -383,8 +391,8 @@ class ECGService:
                 )
                 if risk:
                     self._current_risk = risk
-                    # Fire XGBoost-specific alerts (VENTRICULAR_BEAT, HIGH_RISK_SCORE)
-                    if self._storage_enabled and self._alert_engine:
+                    # Fire XGBoost-specific alerts
+                    if self._alert_engine:
                         self._alert_engine.check_xgboost_risk(risk)
 
             except Exception as exc:
@@ -534,6 +542,8 @@ class ECGService:
                 patient.guardian_phone,
                 patient.emergency_contact,
                 patient.phone,
+                getattr(patient, "doctor_phone",    None),
+                getattr(patient, "ambulance_phone", None),
             )
             if not recipients:
                 return

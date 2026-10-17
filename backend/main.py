@@ -77,7 +77,10 @@ async def lifespan(app: FastAPI):
     # 3. ECG service
     await ecg_service.start()
 
-    # 4. Scheduler
+    # 4. Set default patient on the ECG service (session opens when hardware connects)
+    await _set_ecg_service_patient()
+
+    # 5. Scheduler
     scheduler = setup_scheduler()
     scheduler.start()
     logger.info("APScheduler started with %d jobs", len(scheduler.get_jobs()))
@@ -136,20 +139,57 @@ async def _seed_default_patient() -> None:
         existing = await crud.get_patient(db, "P-001")
         if not existing:
             await crud.create_patient(db, {
-                "patient_id":      "P-001",
-                "name":            "Arjun Sharma",
-                "age":             45,
-                "gender":          "Male",
-                "blood_group":     "B+",
-                "height":          "172 cm",
-                "weight":          "74 kg",
-                "guardian_name":   "Priya Sharma",
-                "guardian_phone":  "+91 98765 43210",
-                "phone":           "+91 98765 43210",
+                "patient_id":        "P-001",
+                "name":              "Arjun Sharma",
+                "age":               45,
+                "dob":               "1980-04-15",
+                "gender":            "Male",
+                "blood_group":       "B+",
+                "height":            "172 cm",
+                "weight":            "74 kg",
+                # Guardian
+                "guardian_name":     "Priya Sharma",
+                "guardian_phone":    "+91 98765 43210",
+                "guardian_relation": "Wife",
+                # Patient contact
+                "phone":             "+91 98765 43210",
                 "emergency_contact": "+91 98765 43210",
+                # Doctor
+                "doctor_name":       "Dr. Ramesh Iyer",
+                "doctor_hospital":   "Apollo Hospital, Bangalore",
+                "doctor_phone":      "+91 80 2345 6789",
+                # Ambulance
+                "ambulance_name":    "City Ambulance Services",
+                "ambulance_phone":   "+91 98001 12345",
+                # Medical
+                "diseases":          "Hypertension; Type 2 Diabetes",
+                "medications":       "Metoprolol 50 mg; Metformin 500 mg",
+                "allergies":         "Penicillin",
+                "notes":             "Patient has a history of mild arrhythmia. Regular ECG monitoring advised.",
+                # Address
+                "address":           "12, Koramangala 3rd Block, Bangalore, Karnataka 560034",
+                "location":          "12.9352,77.6245",
+                "location_address":  "12, Koramangala 3rd Block, Bangalore",
+                "maps_link":         "https://maps.google.com/?q=12.9352,77.6245",
             })
             await db.commit()
             logger.info("Default patient P-001 seeded.")
+
+
+async def _set_ecg_service_patient() -> None:
+    """Tell ECGService which patient to monitor (first in DB, or P-001 fallback)."""
+    from app.database.database import AsyncSessionLocal
+    from app.database import crud
+
+    async with AsyncSessionLocal() as db:
+        patients = await crud.get_all_patients(db)
+        if patients:
+            ecg_service.set_patient_id(patients[0].patient_id)
+            logger.info(
+                "ECGService default patient set to %s — "
+                "session will open when ESP32 connects",
+                patients[0].patient_id,
+            )
 
 
 # ── Application factory ────────────────────────────────────
@@ -170,10 +210,15 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
-            "http://localhost:5173",    # Vite dev server
+            "http://localhost:5173",    # Vite dev server (local)
             "http://localhost:3000",
             "http://127.0.0.1:5173",
+            "http://192.168.30.122:5173",  # Network access for other devices on same WiFi
         ],
+        # Allow any *.ngrok-free.app subdomain so the frontend ngrok tunnel
+        # is always permitted regardless of which URL it was assigned.
+        # Update this regex if you switch to a different tunnelling service.
+        allow_origin_regex=r"https://[a-zA-Z0-9-]+\.ngrok-free\.app",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -220,10 +265,13 @@ def create_app() -> FastAPI:
     async def health_check():
         """Returns 200 OK when the server is running."""
         return {
-            "status": "ok",
-            "version": settings.APP_VERSION,
-            "monitoring": ecg_service.is_monitoring,
-            "connected":  ecg_service.is_connected,
+            "status":             "ok",
+            "version":            settings.APP_VERSION,
+            "monitoring":         ecg_service.is_monitoring,
+            "is_recording":       ecg_service.is_recording,
+            "connected":          ecg_service.is_connected,
+            # hardware_connected = True only when a real ESP32 is sending data
+            "hardware_connected": ecg_service.is_connected,
         }
 
     return app

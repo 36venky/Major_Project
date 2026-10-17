@@ -17,9 +17,20 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { getToken, getRefreshToken, clearToken } from '../services/auth';
+import { BASE_URL } from '../services/apiClient';
 
-const WS_BASE_URL     = `${import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000'}/ws/ecg`;
-const API_BASE_URL    = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+/**
+ * Derive the WebSocket base URL from the HTTP base URL.
+ *   https://...  →  wss://...
+ *   http://...   →  ws://...
+ * This means only VITE_API_URL needs updating when the backend tunnel changes.
+ */
+function toWsBase(httpUrl) {
+  return httpUrl.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
+}
+
+const WS_BASE_URL     = `${toWsBase(BASE_URL)}/ws/ecg`;
+const API_BASE_URL    = BASE_URL;
 const RECONNECT_DELAY = 5000;
 
 /* ── Token helpers ──────────────────────────────────────── */
@@ -42,7 +53,10 @@ async function silentRefresh() {
   try {
     const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
       body:    JSON.stringify({ refresh_token: rt }),
     });
     if (!res.ok) return null;
@@ -100,7 +114,9 @@ export function useWebSocket() {
     }
 
     try {
-      const ws = new WebSocket(`${WS_BASE_URL}?token=${encodeURIComponent(token)}`);
+      const ws = new WebSocket(
+        `${WS_BASE_URL}?token=${encodeURIComponent(token)}&ngrok-skip-browser-warning=true`
+      );
       wsRef.current = ws;
 
       ws.onopen = async () => {
@@ -110,7 +126,9 @@ export function useWebSocket() {
 
         // Check whether real ESP32 hardware is connected
         try {
-          const res = await fetch(`${API_BASE_URL}/health`);
+          const res = await fetch(`${API_BASE_URL}/health`, {
+            headers: { 'ngrok-skip-browser-warning': 'true' },
+          });
           if (res.ok) {
             const h = await res.json();
             const hw = h.hardware_connected === true;

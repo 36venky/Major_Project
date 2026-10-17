@@ -5,6 +5,7 @@ Authentication endpoints — fully DB-backed.
 
 POST /auth/register  – create a new user account
 POST /auth/login     – issue JWT tokens
+POST /auth/refresh   – exchange refresh token for new access token
 POST /auth/logout    – client-side token discard (stateless)
 GET  /auth/profile   – return current user info
 """
@@ -15,6 +16,7 @@ import re
 from datetime import timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -23,6 +25,7 @@ from app.core.security import (
     TokenData,
     create_access_token,
     create_refresh_token,
+    decode_token,
     get_current_user,
     hash_password,
     verify_password,
@@ -175,6 +178,52 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+# ── Refresh ───────────────────────────────────────────────
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    summary="Exchange refresh token for a new access token",
+)
+async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Accept a valid refresh token and return a fresh access + refresh token pair.
+
+    The frontend calls this automatically when the access token is about to expire,
+    enabling seamless silent token refresh without a re-login prompt.
+    """
+    credentials_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired refresh token.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        token_data = decode_token(body.refresh_token)
+    except HTTPException:
+        raise credentials_exc
+
+    # Make sure the user still exists and is active
+    user = await crud.get_user_by_username(db, token_data.sub)
+    if not user or not user.is_active:
+        raise credentials_exc
+
+    token_payload = {"sub": user.username, "role": user.role, "user_id": user.id}
+    new_access  = create_access_token(token_payload)
+    new_refresh = create_refresh_token(token_payload)
+
+    logger.info("Token refreshed for user '%s'", user.username)
+    return TokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 

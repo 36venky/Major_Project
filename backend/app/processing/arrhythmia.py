@@ -168,7 +168,7 @@ def classify(
             is_abnormal = True
             rhythm      = "Possible Premature Beat"
             confidence  = 75
-            risk        = "Medium"
+            risk        = "Moderate"
             details     = "Isolated ectopic beat detected in RR sequence."
 
     # ── Rule 5: Tachycardia / Bradycardia ─────────────────
@@ -177,14 +177,14 @@ def classify(
             flags.append("TACHYCARDIA")
             rhythm      = "Sinus Tachycardia"
             confidence  = 90
-            risk        = "Medium"
+            risk        = "Moderate"
             is_abnormal = True
             details     = f"BPM {bpm:.0f} exceeds normal range (>{settings.HR_HIGH})."
         elif bpm < settings.HR_LOW and bpm > 0:
             flags.append("BRADYCARDIA")
             rhythm      = "Sinus Bradycardia"
             confidence  = 90
-            risk        = "Medium"
+            risk        = "Moderate"
             is_abnormal = True
             details     = f"BPM {bpm:.0f} below normal range (<{settings.HR_LOW})."
 

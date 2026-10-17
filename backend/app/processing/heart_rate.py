@@ -18,7 +18,6 @@ import numpy as np
 
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.processing.r_peak_detection import compute_rr_intervals, detect_r_peaks
 
 logger = get_logger("processing.heart_rate")
 
@@ -120,22 +119,53 @@ class RollingBPMEstimator:
 
     def get_bpm(self) -> float:
         """
-        Estimate current BPM from the buffered window.
+        Estimate current BPM from the buffered window using the actual
+        RR-interval formula: BPM = 60 / mean(RR_intervals_in_seconds).
 
-        Returns 0.0 if the buffer doesn't have enough data.
+        Waits until the buffer contains at least 2 full seconds of data so
+        that at least 2 R-peaks (1 RR interval) can be reliably detected.
+        Returns the previous BPM estimate (not 0) while accumulating data.
         """
-        if len(self._buffer) < self.fs:  # need at least 1 second
-            return self._current_bpm
+        # Need at least 2 seconds to detect ≥2 R-peaks → 1 RR interval.
+        # At 192 Hz that is 384 samples.  We use 2× the sampling rate for
+        # a comfortable margin.
+        min_samples = 2 * self.fs
+        if len(self._buffer) < min_samples:
+            return self._current_bpm   # return last known value, not 0
+
+        from app.processing.signal_filter import full_filter_pipeline
+        from app.processing.r_peak_detection import detect_r_peaks, compute_rr_intervals
 
         arr = np.array(self._buffer, dtype=np.float64)
-        bpm = bpm_from_signal_window(arr, fs=self.fs)
+        try:
+            filtered = full_filter_pipeline(arr, fs=self.fs)
+            r_peaks  = detect_r_peaks(filtered, fs=self.fs)
 
-        # Smoothing: blend new estimate with previous (reduces jitter)
-        if bpm > 0:
-            if self._current_bpm == 0:
+            if len(r_peaks) < 2:
+                # Not enough peaks yet — keep accumulating, return last known
+                return self._current_bpm
+
+            # Core formula: BPM = 60 / mean_RR_seconds
+            rr_seconds = compute_rr_intervals(r_peaks, fs=self.fs)
+            # Gate: only physiologically plausible RR intervals (0.27–2.0 s → 30–220 BPM)
+            valid_rr = rr_seconds[(rr_seconds >= 0.27) & (rr_seconds <= 2.0)]
+            if len(valid_rr) == 0:
+                return self._current_bpm
+
+            bpm = round(60.0 / float(np.mean(valid_rr)), 1)
+
+            # Sanity clamp
+            if not (20.0 <= bpm <= 300.0):
+                return self._current_bpm
+
+            # Light smoothing: blend new estimate with previous to reduce beat-to-beat jitter
+            if self._current_bpm == 0.0:
                 self._current_bpm = bpm
             else:
                 self._current_bpm = round(0.7 * self._current_bpm + 0.3 * bpm, 1)
+
+        except Exception as exc:
+            logger.debug("BPM estimation error: %s", exc)
 
         return self._current_bpm
 

@@ -1,5 +1,10 @@
 Trail
 ecg-dashboard
+frontend2
 Trail/py.py
 Trail/ecg_data.csv
 .vscode
+ECG
+logs
+ecg-guardian
+.agents

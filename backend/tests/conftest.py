@@ -7,7 +7,7 @@ Provides:
   - In-memory SQLite async engine
   - Async test database session
   - FastAPI TestClient with DB override
-  - Authentication helpers
+  - Authentication helpers (seeds test users automatically)
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.security import hash_password
 from app.database.database import Base, get_db
+from app.database import crud
 from main import app
 
 # ── In-memory test database ───────────────────────────────
@@ -38,11 +40,35 @@ def event_loop():
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_db():
-    """Create all tables in the test database once per session."""
+    """Create all tables and seed test users in the in-memory database."""
     async with test_engine.begin() as conn:
         from app.database import models  # noqa: ensure models are registered
         await conn.run_sync(Base.metadata.create_all)
+
+    # Seed the two test users needed by auth fixtures
+    async with TestSessionLocal() as session:
+        if not await crud.username_exists(session, "admin"):
+            await crud.create_user(session, {
+                "username":        "admin",
+                "email":           "admin@test.local",
+                "hashed_password": hash_password("admin123"),
+                "full_name":       "Test Admin",
+                "role":            "admin",
+                "is_active":       True,
+            })
+        if not await crud.username_exists(session, "guardian"):
+            await crud.create_user(session, {
+                "username":        "guardian",
+                "email":           "guardian@test.local",
+                "hashed_password": hash_password("guardian123"),
+                "full_name":       "Test Guardian",
+                "role":            "guardian",
+                "is_active":       True,
+            })
+        await session.commit()
+
     yield
+
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
@@ -80,7 +106,7 @@ async def client(db_session):
 async def auth_headers(client):
     """Return Authorization headers for the 'guardian' test user."""
     resp = await client.post("/auth/login", json={"username": "guardian", "password": "guardian123"})
-    assert resp.status_code == 200
+    assert resp.status_code == 200, f"guardian login failed: {resp.text}"
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
@@ -89,6 +115,6 @@ async def auth_headers(client):
 async def admin_headers(client):
     """Return Authorization headers for the 'admin' test user."""
     resp = await client.post("/auth/login", json={"username": "admin", "password": "admin123"})
-    assert resp.status_code == 200
+    assert resp.status_code == 200, f"admin login failed: {resp.text}"
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

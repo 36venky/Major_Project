@@ -35,20 +35,31 @@ class PatientBase(BaseModel):
     age:            int = Field(..., ge=0, le=150)
     gender:         str = Field(..., max_length=20)
     blood_group:    str = Field(..., max_length=10)
+    dob:            Optional[str] = None          # "YYYY-MM-DD"
     height:         Optional[str] = None
     weight:         Optional[str] = None
-    guardian_name:  Optional[str] = None
-    guardian_phone: Optional[str] = None
-    # Extended fields (Feature 2)
+    # Guardian
+    guardian_name:     Optional[str] = None
+    guardian_phone:    Optional[str] = None
+    guardian_relation: Optional[str] = None
+    # Patient contact
     phone:             Optional[str] = None
     emergency_contact: Optional[str] = None
+    # Doctor (extended)
+    doctor_name:       Optional[str] = None
+    doctor_hospital:   Optional[str] = None
+    doctor_phone:      Optional[str] = None
+    # Ambulance (extended)
+    ambulance_name:    Optional[str] = None
+    ambulance_phone:   Optional[str] = None
+    # Medical
     diseases:          Optional[str] = None
     medications:       Optional[str] = None
     allergies:         Optional[str] = None
+    notes:             Optional[str] = None
+    # Address / registration
     address:           Optional[str] = None
     registration_date: Optional[datetime] = None
-    doctor_phone:      Optional[str] = None
-    ambulance_phone:   Optional[str] = None
     # Location (Feature 7)
     location:          Optional[str] = None   # "lat,lng"
     location_address:  Optional[str] = None
@@ -64,18 +75,30 @@ class PatientUpdate(BaseModel):
     age:               Optional[int] = None
     gender:            Optional[str] = None
     blood_group:       Optional[str] = None
+    dob:               Optional[str] = None
     height:            Optional[str] = None
     weight:            Optional[str] = None
+    # Guardian
     guardian_name:     Optional[str] = None
     guardian_phone:    Optional[str] = None
+    guardian_relation: Optional[str] = None
+    # Patient contact
     phone:             Optional[str] = None
     emergency_contact: Optional[str] = None
+    # Doctor
+    doctor_name:       Optional[str] = None
+    doctor_hospital:   Optional[str] = None
+    doctor_phone:      Optional[str] = None
+    # Ambulance
+    ambulance_name:    Optional[str] = None
+    ambulance_phone:   Optional[str] = None
+    # Medical
     diseases:          Optional[str] = None
     medications:       Optional[str] = None
     allergies:         Optional[str] = None
+    notes:             Optional[str] = None
+    # Address / location
     address:           Optional[str] = None
-    doctor_phone:      Optional[str] = None
-    ambulance_phone:   Optional[str] = None
     location:          Optional[str] = None
     location_address:  Optional[str] = None
     maps_link:         Optional[str] = None
@@ -265,6 +288,40 @@ class UserProfileResponse(BaseModel):
 # ────────────────────────────────────────────────────────────
 
 class WSPayload(BaseModel):
+    """
+    JSON frame broadcast to every connected frontend WebSocket client.
+
+    The `analysis` dict carries two groups of fields:
+
+    Arrhythmia (rule-based, always present when hardware is connected):
+      rhythm          : str   – e.g. "Normal Sinus Rhythm"
+      confidence      : int   – arrhythmia classifier confidence 0-100
+      riskLevel       : str   – "Low" | "Moderate" | "High"
+      signalQuality   : str   – "Good" | "Poor" | …
+      heartRateTrend  : str   – "Stable" | "Rising" | "Falling"
+
+    XGBoost M2 pipeline (present after first 2-s window, null until then):
+      xgbBpm          : float – BPM from XGBoost RR intervals  (192 Hz)
+      xgbConfidence   : float – predict_proba max × 100  (%)
+      xgbRiskScore    : int   – composite 0-100 risk score
+      xgbRiskLabel    : str   – "Low" | "Moderate" | "High" | "Critical"
+      xgbBeatClass    : str   – AAMI short code  e.g. "N" | "V"
+      xgbBeatType     : str   – human label  e.g. "Ventricular Ectopic"
+      sdnn            : float – HRV SDNN (ms)
+      rmssd           : float – HRV RMSSD (ms)
+      abnormalPct     : float – % of abnormal beats since session start
+
+    Full riskPrediction object (consumed by RiskCard):
+      riskPrediction  : dict  – {
+          risk_percentage, risk_level, majority_label, beat_type,
+          xgb_bpm, min_bpm, max_bpm, confidence,
+          sdnn_ms, rmssd_ms, abnormal_ratio, abnormal_pct,
+          risk_score, risk_label
+      }
+
+    NOTE: xgbRiskScore / riskPrediction.risk_score is a prototype/project
+          metric — NOT a clinically validated medical diagnostic score.
+    """
     timestamp:   str
     ecg:         float
     bpm:         int

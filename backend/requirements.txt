@@ -1,47 +1,52 @@
 # ECG Guardian Backend – Python dependencies
 # Install with: pip install -r requirements.txt
 
-# Web framework
+# ── Web framework ──────────────────────────────────────────
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 
-# Database
+# ── Database ───────────────────────────────────────────────
 sqlalchemy==2.0.36
-aiosqlite==0.20.0
+aiosqlite==0.20.0          # SQLite async driver (dev / local)
+# asyncpg==0.30.0          # Uncomment for PostgreSQL / Neon cloud
 
-# Validation
+# ── Validation ─────────────────────────────────────────────
 pydantic==2.10.3
 pydantic-settings==2.7.0
 
-# Signal processing
+# ── Signal processing ──────────────────────────────────────
 numpy==2.2.1
 scipy==1.14.1
 
-# Authentication
+# ── Machine learning (XGBoost M2 pipeline) ─────────────────
+xgboost==2.1.3
+
+# ── Authentication ─────────────────────────────────────────
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.20
 
-# Configuration
+# ── Configuration ──────────────────────────────────────────
 PyYAML==6.0.2
 python-dotenv==1.0.1
 
-# PDF generation
+# ── PDF generation ─────────────────────────────────────────
 reportlab==4.2.5
+pypdf==6.19.0              # PDF merging for /reports/pdf/all
 
-# Background tasks
+# ── Background tasks ───────────────────────────────────────
 apscheduler==3.10.4
 
-# HTTP client (for internal health checks)
+# ── HTTP client (internal health checks / tests) ───────────
 httpx==0.28.1
 
-# Testing
+# ── WhatsApp alerts (Twilio) ───────────────────────────────
+twilio==9.4.5
+
+# ── Utilities ──────────────────────────────────────────────
+python-dateutil==2.9.0
+bcrypt==4.2.0              # Direct bcrypt for password hashing
+
+# ── Testing ────────────────────────────────────────────────
 pytest==8.3.4
 pytest-asyncio==0.25.0
-httpx==0.28.1
-
-# Utilities
-python-dateutil==2.9.0
-
-# Twilio WhatsApp alerts (Feature 4)
-twilio==9.4.5

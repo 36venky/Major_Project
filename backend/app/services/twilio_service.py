@@ -82,16 +82,20 @@ def _collect_recipients(
     emergency_contact: Optional[str],
     phone:             Optional[str],
     doctor_phone:      Optional[str] = None,
+    ambulance_phone:   Optional[str] = None,
 ) -> list[str]:
     """
     Return a deduplicated ordered list of E.164 numbers to message.
 
-    Priority order: guardian_phone → emergency_contact → phone → doctor_phone.
+    Priority order: guardian_phone → emergency_contact → phone
+                    → doctor_phone → ambulance_phone.
     Numbers that are empty, None, or duplicates are silently dropped.
+    All three emergency contacts (guardian, doctor, ambulance) are always
+    included so every stakeholder receives the alert simultaneously.
     """
     seen: set[str] = set()
     result: list[str] = []
-    for raw in (guardian_phone, emergency_contact, phone, doctor_phone):
+    for raw in (guardian_phone, emergency_contact, phone, doctor_phone, ambulance_phone):
         if not raw:
             continue
         normalised = e164(raw.strip())
@@ -168,27 +172,46 @@ class TwilioWhatsAppService:
         if severity not in ("critical", "warning"):
             return
 
-        # Cooldown check — one gate covers all recipients for this alert type
+        # ── Cooldown gate (5-minute default) ─────────────────
+        # Key = (patient_id, alert_type) so each patient+type pair has its
+        # own independent 5-minute window.  This survives session restarts
+        # because it lives on the whatsapp_service singleton (not AlertEngine).
         key  = (patient_id, alert_type)
         last = self._last_sent.get(key)
         now  = datetime.now(timezone.utc)
-        if last and (now - last) < timedelta(seconds=self._cooldown_s):
-            logger.debug(
-                "WhatsApp cooldown active for patient=%s type=%s — suppressing.",
+        if last is not None:
+            elapsed   = (now - last).total_seconds()
+            remaining = self._cooldown_s - elapsed
+            if remaining > 0:
+                logger.info(
+                    "WhatsApp cooldown ACTIVE — patient=%s  type=%s  "
+                    "remaining=%.0fs / %ds  (suppressing send)",
+                    patient_id, alert_type, remaining, self._cooldown_s,
+                )
+                return
+
+        # ── Resolve recipients before stamping cooldown ───────────────────
+        # We stamp AFTER resolving recipients so that a config error
+        # (no phone numbers) does not consume the cooldown window.
+        recipients = _collect_recipients(
+            guardian_phone, emergency_contact, phone, doctor_phone, ambulance_phone
+        )
+        if not recipients:
+            logger.warning(
+                "WhatsApp dispatch skipped — no contact numbers for patient=%s  type=%s",
                 patient_id, alert_type,
             )
             return
 
-        recipients = _collect_recipients(
-            guardian_phone, emergency_contact, phone, doctor_phone
-        )
-        if not recipients:
-            logger.debug(
-                "No contact numbers for patient=%s — skipping WhatsApp dispatch.", patient_id
-            )
-            return
-
+        # Stamp the cooldown NOW — before the async task so concurrent
+        # analysis-loop ticks can't slip a second dispatch through.
         self._last_sent[key] = now
+        logger.info(
+            "WhatsApp dispatch queued — patient=%s  type=%s  severity=%s  "
+            "recipients=%d  next_allowed_in=%ds",
+            patient_id, alert_type, severity,
+            len(recipients), self._cooldown_s,
+        )
 
         asyncio.create_task(
             self._dispatch_all(
@@ -372,6 +395,66 @@ class TwilioWhatsAppService:
                 await db.commit()
         except Exception as exc:
             logger.error("Failed to log WhatsApp dispatch: %s", exc)
+
+    # ── Cooldown inspection / management ──────────────────
+
+    def cooldown_status(self) -> list[dict]:
+        """
+        Return the current cooldown state for every (patient_id, alert_type)
+        that has been dispatched since the last backend restart.
+
+        Returns a list of dicts:
+          { patient_id, alert_type, last_sent_utc, remaining_seconds, on_cooldown }
+
+        Used by the /debug/whatsapp-cooldowns endpoint.
+        """
+        now    = datetime.now(timezone.utc)
+        result = []
+        for (pid, atype), last in sorted(self._last_sent.items()):
+            elapsed   = (now - last).total_seconds()
+            remaining = max(0.0, self._cooldown_s - elapsed)
+            result.append({
+                "patient_id":       pid,
+                "alert_type":       atype,
+                "last_sent_utc":    last.isoformat(),
+                "remaining_seconds": round(remaining, 1),
+                "on_cooldown":      remaining > 0,
+            })
+        return result
+
+    def reset_cooldown(
+        self,
+        patient_id: Optional[str] = None,
+        alert_type: Optional[str] = None,
+    ) -> int:
+        """
+        Clear cooldown entries.
+
+        Args:
+            patient_id: If given, only clear entries for this patient.
+            alert_type: If given, only clear entries for this alert type.
+            Pass neither to clear everything (e.g. after a test).
+
+        Returns the number of entries removed.
+        """
+        if patient_id is None and alert_type is None:
+            count = len(self._last_sent)
+            self._last_sent.clear()
+            logger.info("WhatsApp cooldowns fully reset (%d entries cleared)", count)
+            return count
+
+        keys_to_remove = [
+            k for k in self._last_sent
+            if (patient_id is None or k[0] == patient_id)
+            and (alert_type is None or k[1] == alert_type)
+        ]
+        for k in keys_to_remove:
+            del self._last_sent[k]
+        logger.info(
+            "WhatsApp cooldown reset: patient=%s type=%s — %d entries removed",
+            patient_id or "*", alert_type or "*", len(keys_to_remove),
+        )
+        return len(keys_to_remove)
 
 
 # ── Singleton ─────────────────────────────────────────────

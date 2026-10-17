@@ -61,6 +61,8 @@ def _make_file_handler(log_file: str) -> RotatingFileHandler:
 def _make_console_handler() -> logging.StreamHandler:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(_FORMATTER)
+    # Terminal only shows WARNING+ — all detail goes to the log files
+    handler.setLevel(logging.WARNING)
     return handler
 
 
